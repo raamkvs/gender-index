@@ -25,4 +25,4 @@ RUN chmod +x /app/start.sh
 ENV PORT=8000
 
 # Run the FastAPI app via startup script
-CMD ["/app/start.sh"]
+CMD ["sh", "/app/start.sh"]
