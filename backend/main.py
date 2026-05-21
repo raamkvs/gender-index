@@ -9,8 +9,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from routers import documents, indexes, keywords, ocr, sync
-from routers.common import build_services
+from backend.routers import documents, indexes, keywords, ocr, sync
+from backend.routers.common import build_services
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("doc-indexer-backend")
