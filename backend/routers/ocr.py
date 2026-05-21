@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from keyword_ocr_pipeline import get_azure_settings, run_keyword_ocr
-from schemas import KeywordOCRRequest, KeywordOCRResponse
+from ..schemas import KeywordOCRRequest, KeywordOCRResponse
 
 router = APIRouter(prefix="/ocr", tags=["ocr"])
 

@@ -4,8 +4,8 @@ from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException
 
-from schemas import DocumentStatus
-from routers.common import build_services, hash_value, read_documents
+from ..schemas import DocumentStatus
+from .common import build_services, hash_value, read_documents
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 

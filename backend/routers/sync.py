@@ -6,7 +6,7 @@ from typing import Generator
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 
-from routers.common import build_services, read_documents, read_keywords
+from .common import build_services, read_documents, read_keywords
 
 router = APIRouter(prefix="/sync", tags=["sync"])
 

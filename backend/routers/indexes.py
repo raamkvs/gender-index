@@ -4,8 +4,8 @@ from typing import List
 
 from fastapi import APIRouter, HTTPException
 
-from schemas import IndexInfo
-from routers.common import build_services
+from ..schemas import IndexInfo
+from .common import build_services
 
 router = APIRouter(prefix="/indexes", tags=["indexes"])
 

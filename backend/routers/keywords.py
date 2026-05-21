@@ -4,8 +4,8 @@ from typing import List, Optional
 
 from fastapi import APIRouter
 
-from schemas import KeywordStatus
-from routers.common import build_services, hash_value, read_keywords
+from ..schemas import KeywordStatus
+from .common import build_services, hash_value, read_keywords
 
 router = APIRouter(prefix="/keywords", tags=["keywords"])
 
