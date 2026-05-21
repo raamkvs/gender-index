@@ -20,5 +20,5 @@ COPY . .
 # Expose port (Railway automatically assigns PORT env var)
 ENV PORT=8000
 
-# Run the FastAPI app
-CMD uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+# Run the FastAPI app with shell to properly expand PORT variable
+CMD ["sh", "-c", "uvicorn backend.main:app --host 0.0.0.0 --port ${PORT}"]
