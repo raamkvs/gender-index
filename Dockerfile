@@ -21,6 +21,8 @@ COPY . .
 COPY start.sh /app/start.sh
 RUN chmod +x /app/start.sh
 
+# Expose port 8000
+EXPOSE 8000
+
 # Run the FastAPI app via startup script
-# Railway will provide PORT env var dynamically
 CMD ["sh", "/app/start.sh"]
