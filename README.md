@@ -1,87 +1,129 @@
-# Doc Indexer
+# Gender Reviewer Pipeline
 
-Incremental indexer for Elasticsearch. Pulls documents from multiple sources and indexes only what's new.
+A Railway-hosted FastAPI pipeline that downloads PDFs, OCRs them with Azure Document Intelligence,
+extracts gender-related provisions per document using an LLM, and stores results in Supabase.
+Supports two run modes:
 
-## Sources
+- **`run=first`**: Download from URLs → upload to Vercel Blob → OCR → AI extract per doc → store in Supabase → return all extractions
+- **`run=rerun`**: Pull unprocessed uploads from Supabase → download from Blob → OCR → AI extract → combine with previous results → return all extractions
 
-| Source        | Location                              | Notes                                                       |
-| ------------- | ------------------------------------- | ----------------------------------------------------------- |
-| JSON registry | `registries/documents.json`           | Hand-edited list of docs (`doc_id`, `title`, ...).          |
-| Airtable      | Airtable API (configured via env)     | Pulls attachments, downloads + OCRs each PDF.               |
-| Google Forms  | Forms + Drive APIs (service account)  | Reads file-upload answers, downloads from Drive, OCRs them. |
+## API
 
-`StateTracker` (`state/indexed_state.json`) dedupes by `doc_id` across all sources, so repeat syncs only OCR newly added Airtable attachments.
+### POST `/api/pipeline/analyze`
 
-## Run
+```json
+{
+  "chat_id_topic": "climate-gender-2024",
+  "links": ["https://example.com/doc1.pdf", "https://example.com/doc2.pdf"],
+  "run": "first"
+}
+```
 
-```bash
-# Start Elasticsearch
-docker-compose up -d
+**Response:**
 
-# CLI sync (reads registries/ + Airtable)
-python main.py sync
-python main.py status
-python main.py reindex --doc-id airtable_recXXX_attYYY
-python main.py reindex --all
+```json
+{
+  "chat_id_topic": "climate-gender-2024",
+  "run": "first",
+  "ai_extractions": [
+    "Convention on Biological Diversity (CBD)...",
+    "Paris Agreement (2015)..."
+  ],
+  "documents_processed": 2,
+  "total_documents": 2,
+  "undownloadable_links": [{"url": "...", "reason": "HTTP 403"}],
+  "blob_links": [{"url": "https://blob.vercel-storage.com/...", "filename": "doc1.pdf"}],
+  "ocr_errors": []
+}
+```
 
-# Web UI
-cd backend && pip install fastapi uvicorn && uvicorn main:app --reload
-cd frontend && npm install && npm run dev
-# Open http://localhost:5173
+For `run=rerun`, omit `links`. The pipeline queries `uploads` WHERE `chat_id_topic = X AND processed = false`.
+
+### GET `/health`
+
+Returns `{"status": "healthy"}`.
+
+## Supabase Schema
+
+Run these SQL statements once in your Supabase project:
+
+```sql
+CREATE TABLE document_extractions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  chat_id_topic TEXT NOT NULL,
+  filename TEXT NOT NULL,
+  source_url TEXT,
+  blob_url TEXT,
+  ai_extraction TEXT NOT NULL,
+  keywords TEXT[],
+  processed_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+CREATE INDEX idx_document_extractions_chat ON document_extractions(chat_id_topic);
+CREATE INDEX idx_document_extractions_chat_processed ON document_extractions(chat_id_topic, processed_at DESC);
+
+CREATE TABLE pipeline_results (
+  chat_id_topic TEXT PRIMARY KEY,
+  undownloadable_links JSONB DEFAULT '[]'::jsonb,
+  blob_links JSONB DEFAULT '[]'::jsonb,
+  last_run_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE TABLE uploads (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  chat_id_topic TEXT NOT NULL,
+  blob_url TEXT NOT NULL,
+  filename TEXT NOT NULL,
+  processed BOOLEAN DEFAULT FALSE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+CREATE INDEX idx_uploads_chat_unprocessed ON uploads(chat_id_topic, processed) WHERE processed = FALSE;
 ```
 
 ## Configuration
 
-`.env` (committed defaults):
+Copy `.env.local.example` to `.env.local` and fill in values:
 
-```
-ES_HOST=http://localhost:9200
-ES_INDEX=documents
-ES_KEYWORD_INDEX=keyword_registry
-```
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT` | Yes | Azure OCR endpoint |
+| `AZURE_DOCUMENT_INTELLIGENCE_KEY` | Yes | Azure OCR key |
+| `GPT54_API_KEY` | Yes | Azure AI Foundry key |
+| `GPT54_ENDPOINT` | Yes | Azure AI Foundry responses URL |
+| `AZURE_GPT54_DEPLOYMENT` | Yes | Deployment/model name |
+| `AZURE_GPT54_API_VERSION` | Yes | API version header |
+| `BLOB_READ_WRITE_TOKEN` | Yes | Vercel Blob token |
+| `SUPABASE_URL` | Yes | Supabase project URL |
+| `SUPABASE_KEY` | Yes | Supabase service role key |
+| `CORS_ORIGINS` | No | Comma-separated allowed origins (default: `*`) |
+| `ES_HOST`, `ES_INDEX`, `ES_KEYWORD_INDEX` | No | Only for legacy sync/admin UI |
 
-`.env.local` (secrets, gitignored):
+## Local Development
 
-```
-AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT=...
-AZURE_DOCUMENT_INTELLIGENCE_KEY=...
-
-AIRTABLE_PAT=pat...
-AIRTABLE_BASE_ID=app...
-AIRTABLE_TABLE_NAME=docs1
-AIRTABLE_ATTACHMENT_FIELD=Attachments   # default
-AIRTABLE_TITLE_FIELD=                   # optional, defaults to "Name" then record id
-AIRTABLE_KEYWORDS_FIELD=                # optional, multi-select / comma list
-
-GOOGLE_APPLICATION_CREDENTIALS=.gcp-credentials.json   # path to service account JSON
-GOOGLE_FORM_ID=1no-yFEhXhKyT0Fkvjn3Shv6ruCDjMnPNRht82R4NTSQ
-```
-
-Sources are independently optional — if env vars are missing, that source is silently disabled and `sync` proceeds with the remaining sources.
-
-### Google Forms one-time setup
-
-1. In Google Cloud Console, enable **Google Forms API** and **Google Drive API** on the project that owns the service account.
-2. Open the form, click **Add collaborators**, and add the service account email (e.g. `ram-kvs@gender-undp.iam.gserviceaccount.com`) with **Editor** access. Without this, the API returns `PERMISSION_DENIED`.
-3. Save the service account JSON key to `doc-indexer/.gcp-credentials.json` (gitignored). Do not paste the contents anywhere else.
-4. Add `GOOGLE_APPLICATION_CREDENTIALS=.gcp-credentials.json` and `GOOGLE_FORM_ID=<id>` to `.env.local`.
-
-## doc_id schemes
-
-Each external file becomes one ES document with a stable id so repeat syncs dedup correctly:
-
-| Source        | doc_id format                                  | Local cache path                                    |
-| ------------- | ---------------------------------------------- | --------------------------------------------------- |
-| Airtable      | `airtable_{record_id}_{attachment_id}`         | `downloads/airtable/{record_id}/{filename}`         |
-| Google Forms  | `gform_{response_id}_{file_id}`                | `downloads/google_forms/{response_id}/{filename}`   |
-
-Common doc shape after ingestion:
-
-```
-title    = file name (or record/question title)
-content  = OCR'd paragraphs joined with blank lines
-source   = file URL (Airtable CDN or Drive view link)
-origin   = "airtable" | "google_forms"
+```bash
+pip install -r requirements.txt
+cp .env.local.example .env.local   # fill in values
+uvicorn backend.main:app --reload  # API at http://localhost:8000
 ```
 
-Downloaded files are cached locally so re-runs don't re-download.
+Run tests:
+
+```bash
+pytest tests/test_pipeline.py -v                  # unit tests (no credentials needed)
+pytest tests/ -m integration -v                   # live tests (requires credentials)
+```
+
+## Deploy to Railway
+
+See [RAILWAY_DEPLOY.md](RAILWAY_DEPLOY.md).
+
+## Upload Page (Separate Vercel App)
+
+The `upload-page/` folder contains a Next.js app for users to upload PDFs for a given
+`chat_id_topic`. See [upload-page/README.md](../upload-page/README.md).
+
+## Legacy Features
+
+The legacy Elasticsearch sync/admin UI and Airtable/Google Forms sources are still present
+for backward compatibility. They require `ES_HOST` and respective source credentials.
+See `registries/`, `sources/`, `main.py`, and the frontend in `frontend/`.

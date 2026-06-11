@@ -63,3 +63,38 @@ class KeywordOCRResponse(BaseModel):
     keyword_index: Dict[str, List[KeywordMatch]]
     report_available: bool
     report_filename: Optional[str]
+
+
+class FailedLink(BaseModel):
+    url: str
+    reason: str
+
+
+class OCRError(BaseModel):
+    file: str
+    url: str
+    error: str
+
+
+class BlobLink(BaseModel):
+    url: str
+    filename: str
+
+
+class GenderPipelineRequest(BaseModel):
+    chat_id_topic: str
+    links: List[str] = []
+    run: Literal["first", "rerun"] = "first"
+    output_schema_hint: Optional[str] = None
+    download_timeout: int = 120
+
+
+class GenderPipelineResponse(BaseModel):
+    chat_id_topic: str
+    run: str
+    ai_extractions: List[str]
+    documents_processed: int
+    total_documents: int
+    undownloadable_links: List[FailedLink]
+    blob_links: List[BlobLink]
+    ocr_errors: List[OCRError] = []
