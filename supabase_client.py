@@ -86,7 +86,9 @@ class SupabaseClient:
             .maybe_single()
             .execute()
         )
-        return result.data  # None when no row
+        if result is None:
+            return None
+        return result.data  # None when no matching row
 
     def upsert_pipeline_metadata(
         self,
