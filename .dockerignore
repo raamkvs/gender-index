@@ -24,7 +24,6 @@ htmlcov
 .DS_Store
 *.log
 state/
-registries/
 frontend/node_modules
 frontend/dist
 frontend/.vite
