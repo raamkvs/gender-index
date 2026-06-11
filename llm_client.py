@@ -128,9 +128,18 @@ def _call_llm(
     body: Dict[str, Any] = {
         "model": settings.deployment,
         "input": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
+            {
+                "type": "message",
+                "role": "system",
+                "content": [{"type": "input_text", "text": system_prompt}],
+            },
+            {
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": user_prompt}],
+            },
         ],
+        "store": False,
     }
 
     response = requests.post(
