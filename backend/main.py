@@ -17,6 +17,7 @@ _ROOT = Path(__file__).resolve().parents[1]
 load_dotenv(_ROOT / ".env")
 load_dotenv(_ROOT / ".env.local", override=False)
 
+from backend.job_status_fallback import load_completed_status_from_supabase
 from backend.response_delay import wait_for_response_window
 from backend.routers import documents, indexes, keywords, ocr, pipeline, sync
 from backend.routers.common import build_services
@@ -64,12 +65,22 @@ async def health_check(
     if chat_id is None:
         return {"status": "healthy", "service": "doc-indexer-api"}
 
-    # Pipeline status polling
+    chat_id = chat_id.strip()
     job_manager = get_job_manager()
     job = job_manager.get_job(chat_id)
 
     if job is None:
-        raise HTTPException(status_code=404, detail="Job not found")
+        stored = load_completed_status_from_supabase(chat_id)
+        if stored is not None:
+            return stored
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "Job not found. Pass the exact chat_id_topic from the analyze response "
+                "(not the Copilot conversation ID). If the pipeline was just started, "
+                "retry in a few seconds. If the server restarted, call analyze again."
+            ),
+        )
 
     # Bounded long-poll: wait min 10s, check every 1s, max 25s (under Copilot 30s limit)
     await wait_for_response_window(
@@ -80,29 +91,26 @@ async def health_check(
     # Re-fetch job after wait
     job = job_manager.get_job(chat_id)
     if job is None:
+        stored = load_completed_status_from_supabase(chat_id)
+        if stored is not None:
+            return stored
         raise HTTPException(status_code=404, detail="Job not found")
 
     if job.status == "completed":
-        # Return full results and clean up
-        response = PipelineStatusResponse(
+        return PipelineStatusResponse(
             status="completed",
             chat_id_topic=job.chat_id_topic,
             comments="Pipeline completed successfully",
             result=GenderPipelineResponse(**job.result) if job.result else None,
         )
-        job_manager.delete_job(chat_id)
-        return response
 
     elif job.status == "failed":
-        # Return error and clean up
-        response = PipelineStatusResponse(
+        return PipelineStatusResponse(
             status="failed",
             chat_id_topic=job.chat_id_topic,
             comments="Pipeline failed",
             error=job.error,
         )
-        job_manager.delete_job(chat_id)
-        return response
 
     else:
         # Still pending or in_progress
