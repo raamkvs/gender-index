@@ -1,118 +1,69 @@
 openapi: 3.0.3
 info:
-  title: UNDP Gender Reviewer Version Three
+  title: UNDP Custom Engine Version Six
   description: |
-    REST API for the UNDP Gender Reviewer document pipeline.
-    This API enables Microsoft 365 Copilot to process policy PDFs, extract gender-related provisions using AI, and manage a document processing pipeline across multiple runs.
-  version: 1.0.2
+    Starts the UNDP Gender Reviewer document pipeline asynchronously.
+    Use this connection to start pipeline jobs in the background.
+
+    **Required for first run:** `chat_id_topic`, `run: first`, and at least one PDF URL in `links` or `input`.
+  version: 2.0.4
   contact:
     name: UNDP Gender Reviewer
 
 servers:
   - url: https://gender-index-production.up.railway.app
-    description: Production (Railway)
+    description: Production Environment
 
 tags:
-  - name: Health
-    description: Service health checks
-  - name: Pipeline
-    description: Gender Reviewer document processing pipeline
+  - name: TriggerJob
+    description: Start Gender Reviewer document processing jobs
 
 paths:
-  /health:
-    get:
-      tags:
-        - Health
-      operationId: checkPipelineStatus
-      summary: Check API health or pipeline status
-      description: |
-        Dual-purpose endpoint:
-        - Without chat_id: Returns service health status (instant response)
-        - With chat_id: Returns pipeline job status with bounded long-polling (10-30 second response time)
-        
-        When polling for pipeline status, this endpoint holds the connection for 10-30 seconds to check if the job completes during that window. If completed, returns full results. If still in progress, returns status "in_progress" with comments "wait", and client should poll again.
-      x-ms-summary: Check service health or poll for pipeline job status.
-      parameters:
-        - name: chat_id
-          in: query
-          required: false
-          schema:
-            type: string
-          description: Optional chat_id_topic to check pipeline status. Omit for basic health check.
-      responses:
-        "200":
-          description: Health check or pipeline status response
-          content:
-            application/json:
-              schema:
-                oneOf:
-                  - $ref: "#/components/schemas/HealthResponse"
-                  - $ref: "#/components/schemas/PipelineStatusResponse"
-        "404":
-          description: Job not found (when chat_id provided but no job exists)
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-
   /api/pipeline/analyze:
     post:
       tags:
-        - Pipeline
-      operationId: executeGenderPipeline
+        - TriggerJob
+      operationId: dispatchNewGenderReviewJob
       summary: Start Gender Reviewer document pipeline (async)
       description: |
-        Starts the document processing pipeline asynchronously for a specific session identifier (`chat_id_topic`).
-        
-        **IMPORTANT TIMING**: This endpoint always takes approximately 10 seconds to respond (enforced minimum delay).
-        
-        The pipeline runs in the background. After receiving the "accepted" response, poll the /health endpoint with the chat_id parameter every 10 seconds to check status and retrieve results when complete.
-        
-        **Workflow**:
-        1. Call this endpoint to start the pipeline (~10s response time)
-        2. Wait ~10 seconds
-        3. Poll GET /health?chat_id={chat_id_topic} every 10 seconds
-        4. When status is "completed", retrieve full results from the polling response
-      x-ms-summary: Start async gender analysis pipeline (returns immediately after ~10s, poll /health for results).
+        Starts the document processing pipeline in the background for a session.
+
+        **Common 400 causes:**
+        - Missing or empty `chat_id_topic`
+        - `run` is `first` but no PDF URLs provided in `links` or `input`
+        - Invalid `run` value (must be exactly `first` or `rerun`)
+
+        After success (`202`), poll the Job Status connection with the same `chat_id_topic`.
+      x-ms-summary: Start async gender analysis job; poll Job Status connection for results.
       requestBody:
         required: true
         content:
           application/json:
             schema:
               $ref: "#/components/schemas/GenderPipelineRequest"
+            example:
+              chat_id_topic: "session-8073bdc4"
+              run: first
+              links:
+                - "https://example.org/policy-document.pdf"
       responses:
         "202":
-          description: Pipeline request accepted and started in background (~10s response time).
+          description: Pipeline job accepted (~10 second response time).
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/GenderPipelineAcceptedResponse"
         "400":
-          description: Bad Request.
+          description: Invalid request (missing chat_id_topic, missing links for first run, or invalid run).
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
-        "500":
-          description: Internal Server Error.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                detail: 'links are required for run="first"'
 
 components:
   schemas:
-    HealthResponse:
-      type: object
-      required:
-        - status
-        - service
-      properties:
-        status:
-          type: string
-        service:
-          type: string
-
     GenderPipelineRequest:
       type: object
       required:
@@ -121,112 +72,39 @@ components:
       properties:
         chat_id_topic:
           type: string
+          description: Unique session ID. Required. Use the same value when polling job status.
         links:
           type: array
           items:
             type: string
             format: uri
+          description: PDF source URLs to analyze. Required when run is first (at least one URL).
+        input:
+          oneOf:
+            - type: string
+              format: uri
+            - type: array
+              items:
+                type: string
+                format: uri
+          description: Alternative to links — single URL or list of PDF URLs. Used if links is empty.
         run:
           type: string
           enum:
             - first
             - rerun
           default: first
+          description: Use first for new document links; rerun to reprocess uploads for this session.
         output_schema_hint:
           type: string
           nullable: true
+          description: Optional hint for AI extraction output format.
         download_timeout:
           type: integer
           default: 120
           minimum: 30
           maximum: 300
-
-    GenderPipelineResponse:
-      type: object
-      required:
-        - chat_id_topic
-        - run
-        - ai_extractions
-        - documents_processed
-        - total_documents
-        - undownloadable_links
-        - blob_links
-      properties:
-        chat_id_topic:
-          type: string
-        run:
-          type: string
-          enum:
-            - first
-            - rerun
-        ai_extractions:
-          type: array
-          items:
-            type: string
-        documents_processed:
-          type: integer
-        total_documents:
-          type: integer
-        undownloadable_links:
-          type: array
-          items:
-            $ref: "#/components/schemas/FailedLink"
-        blob_links:
-          type: array
-          items:
-            $ref: "#/components/schemas/BlobLink"
-        ocr_errors:
-          type: array
-          items:
-            $ref: "#/components/schemas/OCRError"
-          default: []
-
-    FailedLink:
-      type: object
-      required:
-        - url
-        - reason
-      properties:
-        url:
-          type: string
-          format: uri
-        reason:
-          type: string
-
-    BlobLink:
-      type: object
-      required:
-        - url
-        - filename
-      properties:
-        url:
-          type: string
-          format: uri
-        filename:
-          type: string
-
-    OCRError:
-      type: object
-      required:
-        - file
-        - url
-        - error
-      properties:
-        file:
-          type: string
-        url:
-          type: string
-          format: uri
-        error:
-          type: string
-
-    ErrorResponse:
-      type: object
-      required:
-        - detail
-      properties:
-        detail:
-          type: string
+          description: PDF download timeout in seconds (30–300).
 
     GenderPipelineAcceptedResponse:
       type: object
@@ -240,39 +118,22 @@ components:
           type: string
           enum:
             - accepted
+          description: Job queued successfully. Poll Job Status connection next.
         chat_id_topic:
           type: string
+          description: Session ID to pass as chat_id to the Job Status connection.
         message:
           type: string
-          description: Instructions to poll /health endpoint for status
+          description: Next-step instructions for polling job status.
         poll_interval_seconds:
           type: integer
-          description: Recommended polling interval in seconds (typically 10)
+          description: Seconds to wait before first status poll (typically 10).
 
-    PipelineStatusResponse:
+    ErrorResponse:
       type: object
       required:
-        - status
-        - chat_id_topic
-        - comments
+        - detail
       properties:
-        status:
+        detail:
           type: string
-          enum:
-            - pending
-            - in_progress
-            - completed
-            - failed
-        chat_id_topic:
-          type: string
-        comments:
-          type: string
-          description: Status message (e.g., "wait" for in_progress, or completion message)
-        result:
-          $ref: "#/components/schemas/GenderPipelineResponse"
-          nullable: true
-          description: Full pipeline results (only present when status is "completed")
-        error:
-          type: string
-          nullable: true
-          description: Error message (only present when status is "failed")
+          description: Error message explaining why the request was rejected.

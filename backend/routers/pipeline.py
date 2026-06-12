@@ -94,7 +94,7 @@ async def analyze_pipeline(request: GenderPipelineRequest) -> GenderPipelineAcce
     thread.start()
 
     # Hold response for minimum 10 seconds
-    await wait_for_response_window(is_ready=lambda: False)
+    await wait_for_response_window(is_ready=lambda: False, wait_until_max=False)
 
     return GenderPipelineAcceptedResponse(
         status="accepted",

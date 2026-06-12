@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Dict, List, Literal, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, model_validator
 
 
 class IndexInfo(BaseModel):
@@ -83,10 +83,25 @@ class BlobLink(BaseModel):
 
 class GenderPipelineRequest(BaseModel):
     chat_id_topic: str
-    links: List[str] = []
+    links: List[str] = Field(default_factory=list)
+    input: Optional[List[str] | str] = None
     run: Literal["first", "rerun"] = "first"
     output_schema_hint: Optional[str] = None
     download_timeout: int = 120
+
+    @model_validator(mode="after")
+    def normalize_links(self) -> "GenderPipelineRequest":
+        """Accept `input` as a Copilot-friendly alias for `links`."""
+        if self.input and not self.links:
+            if isinstance(self.input, str):
+                self.links = [self.input.strip()] if self.input.strip() else []
+            else:
+                self.links = [
+                    str(url).strip()
+                    for url in self.input
+                    if url and str(url).strip()
+                ]
+        return self
 
 
 class GenderPipelineResponse(BaseModel):
