@@ -58,7 +58,7 @@ async def health_check(
     """
     Dual-purpose endpoint:
     - No chat_id: Simple health check (instant response)
-    - With chat_id: Pipeline status polling (10-30s bounded long-poll)
+    - With chat_id: Pipeline status polling (10-25s bounded long-poll)
     """
     # Simple health check for monitoring (instant)
     if chat_id is None:
@@ -71,7 +71,7 @@ async def health_check(
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    # Bounded long-poll: wait min 10s, check every 1s, max 30s
+    # Bounded long-poll: wait min 10s, check every 1s, max 25s (under Copilot 30s limit)
     await wait_for_response_window(
         is_ready=lambda: job_manager.get_job(chat_id) is not None
         and job_manager.get_job(chat_id).status in ("completed", "failed")

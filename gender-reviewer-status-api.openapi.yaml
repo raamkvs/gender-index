@@ -29,7 +29,7 @@ paths:
 
         **Required workflow for Copilot:**
         1. Call this endpoint with `chat_id` set to the session's `chat_id_topic`.
-        2. Wait for the response (10–30 seconds per call).
+        2. Wait for the response (10–25 seconds per call).
         3. If `status` is `in_progress` or `pending` and `comments` is `wait`, pause for ~10 seconds and call again.
         4. If `status` is `completed`, read the results from the `result` object (specifically `result.ai_extractions`).
         5. If `status` is `failed`, stop polling and surface the `error` field to the user.
