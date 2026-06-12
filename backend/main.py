@@ -4,8 +4,9 @@ import logging
 import os
 import sys
 from pathlib import Path
+from typing import Optional, Union
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -16,8 +17,11 @@ _ROOT = Path(__file__).resolve().parents[1]
 load_dotenv(_ROOT / ".env")
 load_dotenv(_ROOT / ".env.local", override=False)
 
+from backend.response_delay import wait_for_response_window
 from backend.routers import documents, indexes, keywords, ocr, pipeline, sync
 from backend.routers.common import build_services
+from backend.schemas import GenderPipelineResponse, PipelineStatusResponse
+from job_manager import get_job_manager
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("doc-indexer-backend")
@@ -48,9 +52,65 @@ app.include_router(sync.router, prefix="/api")
 
 
 @app.get("/health")
-def health_check() -> dict:
-    """Simple health check endpoint for Railway and monitoring."""
-    return {"status": "healthy", "service": "doc-indexer-api"}
+async def health_check(
+    chat_id: Optional[str] = None,
+) -> Union[dict, PipelineStatusResponse]:
+    """
+    Dual-purpose endpoint:
+    - No chat_id: Simple health check (instant response)
+    - With chat_id: Pipeline status polling (10-30s bounded long-poll)
+    """
+    # Simple health check for monitoring (instant)
+    if chat_id is None:
+        return {"status": "healthy", "service": "doc-indexer-api"}
+
+    # Pipeline status polling
+    job_manager = get_job_manager()
+    job = job_manager.get_job(chat_id)
+
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    # Bounded long-poll: wait min 10s, check every 1s, max 30s
+    await wait_for_response_window(
+        is_ready=lambda: job_manager.get_job(chat_id) is not None
+        and job_manager.get_job(chat_id).status in ("completed", "failed")
+    )
+
+    # Re-fetch job after wait
+    job = job_manager.get_job(chat_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if job.status == "completed":
+        # Return full results and clean up
+        response = PipelineStatusResponse(
+            status="completed",
+            chat_id_topic=job.chat_id_topic,
+            comments="Pipeline completed successfully",
+            result=GenderPipelineResponse(**job.result) if job.result else None,
+        )
+        job_manager.delete_job(chat_id)
+        return response
+
+    elif job.status == "failed":
+        # Return error and clean up
+        response = PipelineStatusResponse(
+            status="failed",
+            chat_id_topic=job.chat_id_topic,
+            comments="Pipeline failed",
+            error=job.error,
+        )
+        job_manager.delete_job(chat_id)
+        return response
+
+    else:
+        # Still pending or in_progress
+        return PipelineStatusResponse(
+            status=job.status,
+            chat_id_topic=job.chat_id_topic,
+            comments="wait",
+        )
 
 
 @app.on_event("startup")

@@ -98,3 +98,18 @@ class GenderPipelineResponse(BaseModel):
     undownloadable_links: List[FailedLink]
     blob_links: List[BlobLink]
     ocr_errors: List[OCRError] = []
+
+
+class GenderPipelineAcceptedResponse(BaseModel):
+    status: Literal["accepted"]
+    chat_id_topic: str
+    message: str
+    poll_interval_seconds: int
+
+
+class PipelineStatusResponse(BaseModel):
+    status: Literal["pending", "in_progress", "completed", "failed"]
+    chat_id_topic: str
+    comments: str
+    result: Optional[GenderPipelineResponse] = None
+    error: Optional[str] = None

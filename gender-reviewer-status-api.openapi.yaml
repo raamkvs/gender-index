@@ -1,0 +1,177 @@
+openapi: 3.0.3
+info:
+  title: UNDP Gender Job Monitor Version Three
+  description: |
+    Polls the status of an async Gender Reviewer pipeline job and returns results when complete.
+    Use this after starting a pipeline via the analyze connection. Pass the same `chat_id`
+    value that was used as `chat_id_topic` when the job was submitted.
+  version: 1.0.2
+  contact:
+    name: UNDP Gender Reviewer
+
+servers:
+  - url: https://gender-index-production.up.railway.app
+    description: Production (Railway)
+
+tags:
+  - name: JobTracking
+    description: Poll async pipeline job status and retrieve results
+
+paths:
+  /health:
+    get:
+      tags:
+        - JobTracking
+      operationId: fetchPipelineJobStatus
+      summary: Poll pipeline job status and retrieve results
+      description: |
+        Returns the current status of a Gender Reviewer pipeline job for the given session ID.
+
+        **Required workflow for Copilot:**
+        1. Call this endpoint with `chat_id` set to the session's `chat_id_topic`.
+        2. Wait for the response (10–30 seconds per call).
+        3. If `status` is `in_progress` or `pending` and `comments` is `wait`, pause for ~10 seconds and call again.
+        4. If `status` is `completed`, read the results from the `result` object (specifically `result.ai_extractions`).
+        5. If `status` is `failed`, stop polling and surface the `error` field to the user.
+      x-ms-summary: Track gender analysis background job progress and retrieve completed data.
+      parameters:
+        - name: chat_id
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Session identifier (`chat_id_topic`) returned when the pipeline was started.
+      responses:
+        "200":
+          description: Job status response. Includes full pipeline results when status is completed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobStatusResponse"
+        "404":
+          description: No job found for the given chat_id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+components:
+  schemas:
+    JobStatusResponse:
+      type: object
+      required:
+        - status
+        - chat_id_topic
+        - comments
+      properties:
+        status:
+          type: string
+          enum:
+            - pending
+            - in_progress
+            - completed
+            - failed
+          description: Current job state. Keep polling while pending or in_progress.
+        chat_id_topic:
+          type: string
+          description: Session identifier for this pipeline job.
+        comments:
+          type: string
+          description: |
+            Status indicators. The value `wait` means the job is active — poll again after ~10 seconds.
+        result:
+          $ref: "#/components/schemas/GenderAnalysisResult"
+          nullable: true
+          description: Full pipeline output. Present only when status is completed.
+        error:
+          type: string
+          nullable: true
+          description: Error message. Present only when status is failed.
+
+    GenderAnalysisResult:
+      type: object
+      required:
+        - chat_id_topic
+        - run
+        - ai_extractions
+        - documents_processed
+        - total_documents
+        - undownloadable_links
+        - blob_links
+      properties:
+        chat_id_topic:
+          type: string
+        run:
+          type: string
+          enum:
+            - first
+            - rerun
+        ai_extractions:
+          type: array
+          items:
+            type: string
+          description: AI-extracted gender-related provisions, one entry per document.
+        documents_processed:
+          type: integer
+        total_documents:
+          type: integer
+        undownloadable_links:
+          type: array
+          items:
+            $ref: "#/components/schemas/FailedLink"
+        blob_links:
+          type: array
+          items:
+            $ref: "#/components/schemas/BlobLink"
+        ocr_errors:
+          type: array
+          items:
+            $ref: "#/components/schemas/OCRError"
+          default: []
+
+    FailedLink:
+      type: object
+      required:
+        - url
+        - reason
+      properties:
+        url:
+          type: string
+          format: uri
+        reason:
+          type: string
+
+    BlobLink:
+      type: object
+      required:
+        - url
+        - filename
+      properties:
+        url:
+          type: string
+          format: uri
+        filename:
+          type: string
+
+    OCRError:
+      type: object
+      required:
+        - file
+        - url
+        - error
+      properties:
+        file:
+          type: string
+        url:
+          type: string
+          format: uri
+        error:
+          type: string
+
+    ErrorResponse:
+      type: object
+      required:
+        - detail
+      properties:
+        detail:
+          type: string
