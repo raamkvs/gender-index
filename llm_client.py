@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
@@ -9,6 +10,8 @@ from typing import Any, Dict, List, Optional
 import requests
 
 from doc_catalog import catalog_entry_to_prompt_text
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_OUTPUT_SCHEMA = """\
 Output format (strict — one document only):
