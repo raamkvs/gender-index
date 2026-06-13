@@ -231,17 +231,20 @@ def _run_pipeline_first(
     download_dir = PIPELINE_DOWNLOAD_ROOT / chat_id_topic
     download_result = download_pdfs_detailed(download_dir, links, timeout=download_timeout)
     failed_links: List[FailedLink] = list(download_result.failed_links)
+    logger.info(f"Downloaded {len(download_result.files)} PDFs, {len(failed_links)} failed")
 
     # Upload downloaded PDFs to Vercel Blob (independent path — runs even if OCR fails later)
     blob_links: List[Dict[str, str]] = []
     blob_url_by_file: Dict[str, str] = {}
+    logger.info(f"Uploading {len(download_result.files)} downloaded PDFs to blob storage")
     for pdf_path in download_result.files:
         try:
             url = blob.upload_file(pdf_path, pdf_path.name)
             blob_links.append({"url": url, "filename": pdf_path.name})
             blob_url_by_file[pdf_path.name] = url
+            logger.info(f"Added blob link for {pdf_path.name}: {url}")
         except Exception as exc:  # noqa: BLE001
-            logger.warning("Blob upload failed for %s: %s", pdf_path.name, exc)
+            logger.error(f"Blob upload failed for {pdf_path.name}: {exc}", exc_info=True)
 
     # OCR → keyword search → AI → store per doc in Supabase
     ocr_errors: List[Dict[str, str]] = []

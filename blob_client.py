@@ -30,6 +30,7 @@ class BlobClient:
         """Upload a file to Vercel Blob and return the public URL."""
         import vercel_blob
 
+        logger.info(f"Uploading source document to blob: {filename}")
         with file_path.open("rb") as fh:
             result = vercel_blob.put(
                 filename,
@@ -42,6 +43,7 @@ class BlobClient:
         url = result.get("url") if isinstance(result, dict) else getattr(result, "url", None)
         if not url:
             raise RuntimeError(f"Blob upload returned no URL: {result!r}")
+        logger.info(f"Successfully uploaded source document to blob: {url}")
         return url
 
     def download_file(self, blob_url: str, dest_path: Path, timeout: int = 120) -> Path:
