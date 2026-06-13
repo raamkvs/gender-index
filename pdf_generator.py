@@ -4,24 +4,24 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import List
+from typing import Any, Dict, List
 
 logger = logging.getLogger(__name__)
 
 
 def generate_gender_report_pdf(
     chat_id_topic: str,
-    ai_extractions: List[str],
-    documents_processed: int,
+    documents: List[Dict[str, Any]],
+    undownloadable_links: List[Dict[str, str]],
     run_type: str,
 ) -> Path:
     """
-    Generate a formatted PDF report containing all AI extractions.
+    Generate a formatted PDF report containing document excerpts and links.
     
     Args:
         chat_id_topic: Session ID for the pipeline run
-        ai_extractions: List of AI extraction texts from documents
-        documents_processed: Number of documents successfully processed
+        documents: List of document dicts with 'filename', 'ai_extraction', 'blob_url'
+        undownloadable_links: List of failed downloads with 'url' and 'reason'
         run_type: "first" or "rerun"
     
     Returns:
@@ -112,131 +112,60 @@ def generate_gender_report_pdf(
     time_info = f"<b>Generated:</b> {generation_time}"
     elements.append(Paragraph(time_info, body_style))
     
+    doc_count_info = f"<b>Documents Processed:</b> {len(documents)}"
+    elements.append(Paragraph(doc_count_info, body_style))
+    
     elements.append(PageBreak())
     
-    # Executive Summary
-    elements.append(Paragraph("Executive Summary", heading_style))
-    summary_text = f"""
-    This report contains gender-related analysis from {len(ai_extractions)} policy document(s) 
-    processed through the UNDP Gender Reviewer pipeline. The analysis identifies gender provisions, 
-    gaps, and alignment with international frameworks such as CEDAW, the Beijing Platform for Action, 
-    and SDG 5.
-    """
-    elements.append(Paragraph(summary_text, body_style))
+    # Documents Section
+    elements.append(Paragraph("Policy Documents", heading_style))
     elements.append(Spacer(1, 0.2 * inch))
     
-    # Document Overview
-    elements.append(Paragraph("Document Overview", heading_style))
-    
-    overview_data = [
-        ["Metric", "Count"],
-        ["Documents Processed", str(documents_processed)],
-        ["Total Extractions", str(len(ai_extractions))],
-        ["Run Type", run_type.capitalize()],
-    ]
-    
-    overview_table = Table(overview_data, colWidths=[3 * inch, 2 * inch])
-    overview_table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#003366')),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, 0), 12),
-        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-        ('GRID', (0, 0), (-1, -1), 1, colors.black),
-    ]))
-    
-    elements.append(overview_table)
-    elements.append(Spacer(1, 0.3 * inch))
-    
-    # Gender Provisions Found
-    elements.append(Paragraph("Gender Provisions Analysis", heading_style))
-    elements.append(Spacer(1, 0.1 * inch))
-    
-    for idx, extraction in enumerate(ai_extractions, 1):
-        # Subheading for each document
-        doc_heading = f"Document {idx}"
-        elements.append(Paragraph(doc_heading, subheading_style))
+    for idx, doc in enumerate(documents, 1):
+        filename = doc.get('filename', 'Unknown Document')
+        blob_url = doc.get('blob_url', '')
+        ai_extraction = doc.get('ai_extraction', 'No extraction available')
+        
+        # Document title with blob link
+        if blob_url:
+            doc_title_html = f'<b>{idx}. {filename}</b><br/><font color="#0066cc"><u>{blob_url}</u></font>'
+        else:
+            doc_title_html = f'<b>{idx}. {filename}</b><br/><i>No blob link available</i>'
+        
+        elements.append(Paragraph(doc_title_html, subheading_style))
+        elements.append(Spacer(1, 0.1 * inch))
         
         # Clean and format the extraction text
-        # Escape HTML special characters
         extraction_cleaned = (
-            extraction
+            ai_extraction
             .replace('&', '&amp;')
             .replace('<', '&lt;')
             .replace('>', '&gt;')
             .replace('\n', '<br/>')
         )
         
-        # Wrap long lines
-        if len(extraction_cleaned) > 5000:
-            extraction_cleaned = extraction_cleaned[:5000] + "...<br/><i>[Extraction truncated for brevity]</i>"
+        # Truncate very long extractions
+        if len(extraction_cleaned) > 8000:
+            extraction_cleaned = extraction_cleaned[:8000] + "...<br/><i>[Excerpt truncated for brevity]</i>"
         
         elements.append(Paragraph(extraction_cleaned, body_style))
+        elements.append(Spacer(1, 0.3 * inch))
+    
+    # Failed Downloads Section (if any)
+    if undownloadable_links:
+        elements.append(PageBreak())
+        elements.append(Paragraph("Failed Downloads", heading_style))
         elements.append(Spacer(1, 0.2 * inch))
-    
-    # Gender Gaps Section
-    elements.append(PageBreak())
-    elements.append(Paragraph("Gender Gaps Identified", heading_style))
-    gaps_text = """
-    Based on the analysis of the provided documents, gender gaps may include:
-    <br/><br/>
-    <b>1. Representation Gaps:</b> Limited mention of women's participation in decision-making processes
-    or leadership roles.<br/><br/>
-    <b>2. Data Gaps:</b> Insufficient sex-disaggregated data for monitoring and evaluation.<br/><br/>
-    <b>3. Budget Allocation:</b> Lack of specific budget allocations for gender-responsive programs.<br/><br/>
-    <b>4. Implementation Mechanisms:</b> Absence of clear implementation strategies for gender commitments.
-    """
-    elements.append(Paragraph(gaps_text, body_style))
-    elements.append(Spacer(1, 0.2 * inch))
-    
-    # Framework Alignment
-    elements.append(Paragraph("Framework Alignment", heading_style))
-    framework_text = """
-    <b>CEDAW (Convention on the Elimination of All Forms of Discrimination Against Women):</b><br/>
-    Review document provisions against CEDAW articles, particularly Articles 2, 3, and 7 related to 
-    policy measures, guarantees of rights, and political participation.<br/><br/>
-    
-    <b>Beijing Platform for Action:</b><br/>
-    Assess alignment with the 12 critical areas of concern, especially regarding women in power and 
-    decision-making, and institutional mechanisms for advancement.<br/><br/>
-    
-    <b>SDG 5 (Gender Equality):</b><br/>
-    Evaluate how the documents support SDG 5 targets, including ending discrimination, ensuring 
-    participation and leadership, and adopting sound policies for gender equality.
-    """
-    elements.append(Paragraph(framework_text, body_style))
-    elements.append(Spacer(1, 0.2 * inch))
-    
-    # Recommendations
-    elements.append(Paragraph("Recommendations", heading_style))
-    recommendations_text = """
-    <b>1. Strengthen Gender Mainstreaming:</b> Integrate gender considerations across all policy areas
-    and ensure gender impact assessments are conducted.<br/><br/>
-    
-    <b>2. Enhance Monitoring Systems:</b> Develop robust systems for tracking gender-related indicators
-    with sex-disaggregated data collection.<br/><br/>
-    
-    <b>3. Allocate Adequate Resources:</b> Ensure sufficient budget allocations for gender equality 
-    initiatives with clear accountability mechanisms.<br/><br/>
-    
-    <b>4. Build Institutional Capacity:</b> Invest in training and capacity building for government 
-    officials on gender-responsive policy making.<br/><br/>
-    
-    <b>5. Engage Stakeholders:</b> Foster inclusive consultation processes with women's organizations 
-    and civil society in policy development and implementation.
-    """
-    elements.append(Paragraph(recommendations_text, body_style))
-    
-    # Footer note
-    elements.append(Spacer(1, 0.5 * inch))
-    footer_text = """
-    <i>Note: This report is automatically generated by the UNDP Gender Reviewer Pipeline. 
-    The analysis is based on AI extraction of policy documents and should be reviewed by 
-    gender experts for comprehensive assessment.</i>
-    """
-    elements.append(Paragraph(footer_text, body_style))
+        
+        failed_text = "The following documents could not be downloaded:<br/><br/>"
+        elements.append(Paragraph(failed_text, body_style))
+        
+        for failed in undownloadable_links:
+            url = failed.get('url', 'Unknown URL')
+            reason = failed.get('reason', 'Unknown reason')
+            
+            failed_item = f'<b>URL:</b> {url}<br/><b>Reason:</b> {reason}<br/><br/>'
+            elements.append(Paragraph(failed_item, body_style))
     
     # Build PDF
     try:

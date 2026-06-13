@@ -61,27 +61,34 @@ def _build_ai_extractions_response(
 
 def _generate_and_upload_pdf(
     chat_id_topic: str,
-    ai_extractions: List[str],
-    documents_processed: int,
+    documents: List[Dict[str, Any]],
+    undownloadable_links: List[Dict[str, str]],
     run_type: str,
     supabase: SupabaseClient,
 ) -> Optional[str]:
     """
     Generate PDF report, upload to docs-generated blob store, and save to Supabase.
     
+    Args:
+        chat_id_topic: Session ID
+        documents: List of document dicts with 'filename', 'ai_extraction', 'blob_url'
+        undownloadable_links: List of failed downloads with 'url' and 'reason'
+        run_type: "first" or "rerun"
+        supabase: Supabase client
+    
     Returns:
         URL of the uploaded PDF, or None if generation fails
     """
-    if not ai_extractions:
-        logger.info("No AI extractions available, skipping PDF generation")
+    if not documents:
+        logger.info("No documents available, skipping PDF generation")
         return None
     
     try:
         # Generate PDF
         pdf_path = generate_gender_report_pdf(
             chat_id_topic=chat_id_topic,
-            ai_extractions=ai_extractions,
-            documents_processed=documents_processed,
+            documents=documents,
+            undownloadable_links=undownloadable_links,
             run_type=run_type,
         )
         
@@ -94,7 +101,7 @@ def _generate_and_upload_pdf(
             chat_id_topic=chat_id_topic,
             blob_url=pdf_url,
             filename=f"{chat_id_topic}-report.pdf",
-            document_count=len(ai_extractions),
+            document_count=len(documents),
         )
         
         # Clean up temp file
@@ -252,24 +259,27 @@ def _run_pipeline_first(
         )
 
     # Persist pipeline metadata (undownloadable links + blob links)
+    undownloadable_list = [{"url": f.url, "reason": f.reason} for f in failed_links]
     supabase.upsert_pipeline_metadata(
         chat_id_topic=chat_id_topic,
-        undownloadable_links=[{"url": f.url, "reason": f.reason} for f in failed_links],
+        undownloadable_links=undownloadable_list,
         blob_links=blob_links,
     )
 
-    all_extractions = supabase.get_all_extraction_texts(chat_id_topic)
+    # Get all document records (with filename, blob_url, ai_extraction)
+    all_documents = supabase.get_all_extractions(chat_id_topic)
+    all_extraction_texts = [doc["ai_extraction"] for doc in all_documents]
 
     # Generate PDF report and upload to docs-generated blob store
     generated_pdf_url = _generate_and_upload_pdf(
         chat_id_topic=chat_id_topic,
-        ai_extractions=all_extractions,
-        documents_processed=len(download_result.files),
+        documents=all_documents,
+        undownloadable_links=undownloadable_list,
         run_type="first",
         supabase=supabase,
     )
     ai_extractions = _build_ai_extractions_response(
-        all_extractions, generated_pdf_url, "first"
+        all_extraction_texts, generated_pdf_url, "first"
     )
 
     return {
@@ -278,8 +288,8 @@ def _run_pipeline_first(
         "report_pdf_url": generated_pdf_url,
         "ai_extractions": ai_extractions,
         "documents_processed": len(download_result.files),
-        "total_documents": len(all_extractions),
-        "undownloadable_links": [{"url": f.url, "reason": f.reason} for f in failed_links],
+        "total_documents": len(all_extraction_texts),
+        "undownloadable_links": undownloadable_list,
         "blob_links": blob_links,
         "ocr_errors": ocr_errors,
     }
@@ -299,11 +309,16 @@ def _run_pipeline_rerun(
     unprocessed = supabase.get_unprocessed_uploads(chat_id_topic)
 
     if not unprocessed:
-        all_extractions = supabase.get_all_extraction_texts(chat_id_topic)
+        all_extraction_texts = supabase.get_all_extraction_texts(chat_id_topic)
         generated_doc = supabase.get_generated_document(chat_id_topic)
         generated_pdf_url = generated_doc["blob_url"] if generated_doc else None
+        
+        # Get pipeline metadata for undownloadable_links
+        pipeline_meta = supabase.get_pipeline_metadata(chat_id_topic)
+        undownloadable_list = pipeline_meta.get("undownloadable_links", []) if pipeline_meta else []
+        
         ai_extractions = _build_ai_extractions_response(
-            all_extractions, generated_pdf_url, "rerun"
+            all_extraction_texts, generated_pdf_url, "rerun"
         )
         return {
             "chat_id_topic": chat_id_topic,
@@ -311,8 +326,8 @@ def _run_pipeline_rerun(
             "report_pdf_url": generated_pdf_url,
             "ai_extractions": ai_extractions,
             "documents_processed": 0,
-            "total_documents": len(all_extractions),
-            "undownloadable_links": [],
+            "total_documents": len(all_extraction_texts),
+            "undownloadable_links": undownloadable_list,
             "blob_links": [],
             "ocr_errors": [],
         }
@@ -355,18 +370,24 @@ def _run_pipeline_rerun(
     # Mark all queried uploads as processed (even if some failed OCR/AI)
     supabase.mark_uploads_processed([u["id"] for u in unprocessed])
 
-    all_extractions = supabase.get_all_extraction_texts(chat_id_topic)
+    # Get all document records and pipeline metadata
+    all_documents = supabase.get_all_extractions(chat_id_topic)
+    all_extraction_texts = [doc["ai_extraction"] for doc in all_documents]
+    
+    # Get undownloadable links from pipeline metadata
+    pipeline_meta = supabase.get_pipeline_metadata(chat_id_topic)
+    undownloadable_list = pipeline_meta.get("undownloadable_links", []) if pipeline_meta else []
 
     # Generate PDF report and upload to docs-generated blob store
     generated_pdf_url = _generate_and_upload_pdf(
         chat_id_topic=chat_id_topic,
-        ai_extractions=all_extractions,
-        documents_processed=len(pdf_paths),
+        documents=all_documents,
+        undownloadable_links=undownloadable_list,
         run_type="rerun",
         supabase=supabase,
     )
     ai_extractions = _build_ai_extractions_response(
-        all_extractions, generated_pdf_url, "rerun"
+        all_extraction_texts, generated_pdf_url, "rerun"
     )
 
     return {
@@ -375,8 +396,8 @@ def _run_pipeline_rerun(
         "report_pdf_url": generated_pdf_url,
         "ai_extractions": ai_extractions,
         "documents_processed": len(pdf_paths),
-        "total_documents": len(all_extractions),
-        "undownloadable_links": [],
+        "total_documents": len(all_extraction_texts),
+        "undownloadable_links": undownloadable_list,
         "blob_links": blob_links,
         "ocr_errors": ocr_errors,
     }
