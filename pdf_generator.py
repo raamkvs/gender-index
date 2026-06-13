@@ -121,10 +121,10 @@ def generate_gender_report_pdf(
     elements.append(Paragraph("Policy Documents", heading_style))
     elements.append(Spacer(1, 0.2 * inch))
     
-    for idx, doc in enumerate(documents, 1):
-        filename = doc.get('filename', 'Unknown Document')
-        blob_url = doc.get('blob_url', '')
-        ai_extraction = doc.get('ai_extraction', 'No extraction available')
+    for idx, document in enumerate(documents, 1):
+        filename = document.get('filename', 'Unknown Document')
+        blob_url = document.get('blob_url', '')
+        ai_extraction = document.get('ai_extraction', 'No extraction available')
         
         # Document title with blob link
         if blob_url:
