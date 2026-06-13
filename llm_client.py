@@ -13,17 +13,29 @@ from doc_catalog import catalog_entry_to_prompt_text
 DEFAULT_OUTPUT_SCHEMA = """\
 Output format (strict — one document only):
 
-1. Begin with the full document name and official citation as it appears in the text \
-(treaty name, instrument title, document symbol, year, decision/article numbers, etc.).
-2. Immediately follow with the extracted passages — verbatim or lightly cleaned OCR text \
-covering gender, women, gender equality, empowerment of women, human rights, indigenous \
-peoples, local communities, and closely related provisions.
-3. Do not use section labels such as "Document Name:" or "Extract:".
-4. Write as continuous prose: {Document Name/Citation}. {Extracted passages...}
-5. If nothing relevant is found, output: {Document Name/Citation}. No relevant gender-related provisions found.
+Format your output using this markdown-style structure:
+
+1. Start with a subsection header: ### {Organization/Treaty Name}
+2. Follow with the full citation in bold: **{Document symbol, title, article/section numbers, year}**
+3. Then provide the extracted provisions in clear paragraphs
+4. Use *italics* (with asterisks) to emphasize key gender-related terms like: women, girls, \
+gender equality, empowerment, indigenous peoples, local communities, rural women, young women, etc.
+5. For articles with sub-sections, use **(a)**, **(b)**, **(c)** formatting
+6. Separate distinct provisions with blank lines
+7. If grouping by theme is needed, use ## {Theme Name} before subsections
+8. If nothing relevant is found, output: ### {Organization Name}\n\n**{Document citation}**\n\nNo relevant gender-related provisions found.
 
 Example:
-Convention on Biological Diversity (CBD) UNEP/CBD/COP/5/23 (2000). V/16. Article 8(j) and related provisions. Preamble Recognizing the vital role that women play in the conservation and sustainable use of biodiversity, and emphasizing that greater attention should be given to strengthening this role and the participation of women of indigenous and local communities in the programme of work.
+
+### Convention on the Elimination of All Forms of Discrimination against Women (CEDAW)
+
+**CEDAW 1979. Article 14.2.**
+
+States Parties shall take all appropriate measures to eliminate discrimination against *women in rural areas* in order to ensure, on a basis of equality of men and women, that they participate in and benefit from rural development and, in particular, shall ensure to such women the right:
+
+**(a)** To participate in the elaboration and implementation of development planning at all levels.
+
+**(b)** To have access to adequate health care facilities, including information, counselling and services in family planning.
 """
 
 

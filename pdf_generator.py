@@ -2,11 +2,177 @@
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_markdown_to_flowables(text: str, styles: Any) -> List[Any]:
+    """
+    Parse markdown-style text into ReportLab Flowable elements.
+    
+    Supports:
+    - ## Section headers
+    - ### Subsection headers
+    - **bold text**
+    - *italic text*
+    - (a), (b), (c) list items
+    - Horizontal rules (---)
+    - Paragraphs
+    """
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.platypus import Paragraph, Spacer
+    from reportlab.lib.units import inch
+    from reportlab.lib import colors
+    
+    elements = []
+    lines = text.split('\n')
+    
+    # Define styles for different elements
+    section_style = ParagraphStyle(
+        'Section',
+        parent=styles['Heading2'],
+        fontSize=15,
+        textColor=colors.HexColor('#003366'),
+        spaceAfter=10,
+        spaceBefore=16,
+        fontName='Helvetica-Bold',
+    )
+    
+    subsection_style = ParagraphStyle(
+        'Subsection',
+        parent=styles['Heading3'],
+        fontSize=13,
+        textColor=colors.HexColor('#006699'),
+        spaceAfter=8,
+        spaceBefore=12,
+        fontName='Helvetica-Bold',
+    )
+    
+    body_style = ParagraphStyle(
+        'Body',
+        parent=styles['BodyText'],
+        fontSize=11,
+        leading=16,
+        spaceAfter=8,
+        alignment=4,  # Justify
+    )
+    
+    list_item_style = ParagraphStyle(
+        'ListItem',
+        parent=styles['BodyText'],
+        fontSize=11,
+        leading=16,
+        spaceAfter=6,
+        leftIndent=20,
+        alignment=4,  # Justify
+    )
+    
+    i = 0
+    while i < len(lines):
+        line = lines[i].strip()
+        
+        # Skip empty lines
+        if not line:
+            i += 1
+            continue
+        
+        # Horizontal rule
+        if line.startswith('---'):
+            elements.append(Spacer(1, 0.2 * inch))
+            i += 1
+            continue
+        
+        # Section header (##) - must check before subsection
+        if line.startswith('##') and not line.startswith('###'):
+            header_text = line[2:].strip()
+            # Escape HTML entities
+            header_text = (
+                header_text
+                .replace('&', '&amp;')
+                .replace('<', '&lt;')
+                .replace('>', '&gt;')
+            )
+            elements.append(Paragraph(f'<b>{header_text}</b>', section_style))
+            i += 1
+            continue
+        
+        # Subsection header (###)
+        if line.startswith('###'):
+            header_text = line[3:].strip()
+            # Escape HTML entities
+            header_text = (
+                header_text
+                .replace('&', '&amp;')
+                .replace('<', '&lt;')
+                .replace('>', '&gt;')
+            )
+            elements.append(Paragraph(f'<b>{header_text}</b>', subsection_style))
+            i += 1
+            continue
+        
+        # Regular paragraph or list item
+        # Collect multiple lines that form a paragraph
+        paragraph_lines = [line]
+        i += 1
+        while i < len(lines):
+            next_line = lines[i].strip()
+            # Stop at empty line, header (## or ###), or horizontal rule
+            if not next_line or next_line.startswith('##') or next_line.startswith('---'):
+                break
+            paragraph_lines.append(next_line)
+            i += 1
+        
+        # Join the paragraph lines
+        paragraph_text = ' '.join(paragraph_lines)
+        
+        # Determine if it's a list item
+        is_list_item = re.match(r'^\*\*\([a-z]\)\*\*', paragraph_text)
+        
+        # Parse markdown formatting
+        # First, handle bold (**text**) - must be done before italic
+        paragraph_text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', paragraph_text)
+        
+        # Then handle italic (*text*) - but not ** which might be leftover
+        # Split by <b> and </b> tags to avoid italicizing content inside bold tags
+        parts = re.split(r'(<b>.*?</b>)', paragraph_text)
+        for idx, part in enumerate(parts):
+            if not part.startswith('<b>'):
+                # Only process parts outside of bold tags
+                parts[idx] = re.sub(r'(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)', r'<i>\1</i>', part)
+        paragraph_text = ''.join(parts)
+        
+        # Escape remaining HTML entities
+        # First, protect our tags
+        paragraph_text = paragraph_text.replace('<b>', '___BOLD_START___')
+        paragraph_text = paragraph_text.replace('</b>', '___BOLD_END___')
+        paragraph_text = paragraph_text.replace('<i>', '___ITALIC_START___')
+        paragraph_text = paragraph_text.replace('</i>', '___ITALIC_END___')
+        
+        # Escape entities
+        paragraph_text = (
+            paragraph_text
+            .replace('&', '&amp;')
+            .replace('<', '&lt;')
+            .replace('>', '&gt;')
+        )
+        
+        # Restore our tags
+        paragraph_text = paragraph_text.replace('___BOLD_START___', '<b>')
+        paragraph_text = paragraph_text.replace('___BOLD_END___', '</b>')
+        paragraph_text = paragraph_text.replace('___ITALIC_START___', '<i>')
+        paragraph_text = paragraph_text.replace('___ITALIC_END___', '</i>')
+        
+        # Choose appropriate style
+        style = list_item_style if is_list_item else body_style
+        
+        # Add the paragraph
+        elements.append(Paragraph(paragraph_text, style))
+    
+    return elements
 
 
 def generate_gender_report_pdf(
@@ -126,30 +292,25 @@ def generate_gender_report_pdf(
         blob_url = document.get('blob_url', '')
         ai_extraction = document.get('ai_extraction', 'No provision available')
         
-        # Document name (without number, cleaner format)
-        # Remove file extension if present
-        doc_name = filename.replace('.pdf', '').replace('.PDF', '')
-        doc_name_html = f'<b>{doc_name}</b>'
+        # Parse the markdown-formatted extraction into flowable elements
+        provision_elements = _parse_markdown_to_flowables(ai_extraction, styles)
         
-        elements.append(Paragraph(doc_name_html, subheading_style))
-        elements.append(Spacer(1, 0.1 * inch))
+        # Add all the parsed elements
+        elements.extend(provision_elements)
         
-        # Clean and format the provision text
-        # Keep newlines as paragraph breaks for better readability
-        provision_cleaned = (
-            ai_extraction
-            .replace('&', '&amp;')
-            .replace('<', '&lt;')
-            .replace('>', '&gt;')
-            .replace('\n\n', '<br/><br/>')  # Double newlines become paragraph breaks
-            .replace('\n', ' ')  # Single newlines become spaces
-        )
-        
-        # Add blob link at the end of the provision if available
+        # Add blob link at the end if available
         if blob_url:
-            provision_cleaned += f'<br/><br/><font color="#0066cc" size="9"><u>{blob_url}</u></font>'
+            link_style = ParagraphStyle(
+                'Link',
+                parent=styles['BodyText'],
+                fontSize=9,
+                textColor=colors.HexColor('#0066cc'),
+                spaceAfter=10,
+            )
+            link_text = f'<u>{blob_url}</u>'
+            elements.append(Paragraph(link_text, link_style))
         
-        elements.append(Paragraph(provision_cleaned, body_style))
+        # Add spacing between documents
         elements.append(Spacer(1, 0.4 * inch))
     
     # Failed Downloads Section (if any)
