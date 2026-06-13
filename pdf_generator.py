@@ -292,23 +292,30 @@ def generate_gender_report_pdf(
         blob_url = document.get('blob_url', '')
         ai_extraction = document.get('ai_extraction', 'No provision available')
         
-        # Parse the markdown-formatted extraction into flowable elements
-        provision_elements = _parse_markdown_to_flowables(ai_extraction, styles)
+        # Add document title as a subheading
+        doc_title = filename.replace('.pdf', '').replace('.PDF', '').replace('-', ' ').replace('_', ' ').upper()
+        elements.append(Paragraph(f'<b>{doc_title}</b>', subheading_style))
+        elements.append(Spacer(1, 0.1 * inch))
         
-        # Add all the parsed elements
-        elements.extend(provision_elements)
-        
-        # Add blob link at the end if available
+        # Add blob link right after title if available
         if blob_url:
             link_style = ParagraphStyle(
                 'Link',
                 parent=styles['BodyText'],
                 fontSize=9,
                 textColor=colors.HexColor('#0066cc'),
-                spaceAfter=10,
+                spaceAfter=12,
             )
-            link_text = f'<u>{blob_url}</u>'
+            # Escape the URL for HTML
+            safe_url = blob_url.replace('&', '&amp;')
+            link_text = f'<u>{safe_url}</u>'
             elements.append(Paragraph(link_text, link_style))
+        
+        # Parse the markdown-formatted extraction into flowable elements
+        provision_elements = _parse_markdown_to_flowables(ai_extraction, styles)
+        
+        # Add all the parsed elements
+        elements.extend(provision_elements)
         
         # Add spacing between documents
         elements.append(Spacer(1, 0.4 * inch))
