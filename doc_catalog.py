@@ -42,8 +42,6 @@ def catalog_entry_to_prompt_text(entry: Dict[str, Any]) -> str:
         f"Document index: {entry.get('doc_index', '')}",
         f"Filename: {entry.get('filename', '')}",
         f"Source URL: {entry.get('source_url', '')}",
-        "",
-        "IMPORTANT: Extract the official document title from the text below. If no clear title is found, use the filename above.",
     ]
     if entry.get("truncated"):
         parts.append("(Text truncated for model context limits.)")
@@ -54,7 +52,6 @@ def catalog_entry_to_prompt_text(entry: Dict[str, Any]) -> str:
         for excerpt in relevant[:15]:
             parts.append(f"  - {str(excerpt)[:300]}")
     parts.append("")
-    parts.append("Document text:")
     parts.append(str(entry.get("text", "")))
     return "\n".join(parts).strip()
 

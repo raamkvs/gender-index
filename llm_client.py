@@ -15,38 +15,27 @@ Output format (strict — one document only):
 
 Format your output using this markdown-style structure:
 
-1. **IMPORTANT**: First identify and extract the official document title/name from the document text. \
-This should be the full official title as it appears in the document (e.g., "National Gender Strategy 2023-2030", \
-"Gender Equality Act 2019", etc.). If no clear title is found in the text, use the filename provided.
-
-2. Start with a subsection header using the document title: ### {Official Document Title or Filename}
-
-3. Follow with the full citation in bold: **{Document symbol, title, article/section numbers, year}**
-
-4. Then provide the extracted provisions in clear paragraphs
-
-5. Use *italics* (with asterisks) to emphasize key gender-related terms like: women, girls, \
+1. Start with a subsection header: ### {Organization/Treaty Name}
+2. Follow with the full citation in bold: **{Document symbol, title, article/section numbers, year}**
+3. Then provide the extracted provisions in clear paragraphs
+4. Use *italics* (with asterisks) to emphasize key gender-related terms like: women, girls, \
 gender equality, empowerment, indigenous peoples, local communities, rural women, young women, etc.
-
-6. For articles with sub-sections, use **(a)**, **(b)**, **(c)** formatting
-
-7. Separate distinct provisions with blank lines
-
-8. If grouping by theme is needed, use ## {Theme Name} before subsections
-
-9. If nothing relevant is found, output: ### {Document Title}\n\n**{Document citation}**\n\nNo relevant gender-related provisions found.
+5. For articles with sub-sections, use **(a)**, **(b)**, **(c)** formatting
+6. Separate distinct provisions with blank lines
+7. If grouping by theme is needed, use ## {Theme Name} before subsections
+8. If nothing relevant is found, output: ### {Organization Name}\n\n**{Document citation}**\n\nNo relevant gender-related provisions found.
 
 Example:
 
-### UAE National Strategy for Empowerment of Emirati Women 2015-2021
+### Convention on the Elimination of All Forms of Discrimination against Women (CEDAW)
 
-**UAE National Strategy for Empowerment of Emirati Women. Adopted 2015.**
+**CEDAW 1979. Article 14.2.**
 
-The strategy aims to empower *Emirati women* in all fields and enhance their effective participation in sustainable development. It focuses on enabling *women* to occupy leadership positions in decision-making and enhancing their economic and social participation.
+States Parties shall take all appropriate measures to eliminate discrimination against *women in rural areas* in order to ensure, on a basis of equality of men and women, that they participate in and benefit from rural development and, in particular, shall ensure to such women the right:
 
-**(a)** Ensure equal opportunities for *women* in education and employment sectors.
+**(a)** To participate in the elaboration and implementation of development planning at all levels.
 
-**(b)** Enhance the participation of *women* in leadership and decision-making positions.
+**(b)** To have access to adequate health care facilities, including information, counselling and services in family planning.
 """
 
 
@@ -192,8 +181,7 @@ def analyze_document_with_llm(
     schema = _resolve_output_schema(output_schema_hint)
     system_prompt = (
         "You extract gender-related and closely associated provisions from a single "
-        "OCR'd document. Your first task is to identify the official document title from the text. "
-        "Follow the output format exactly.\n\n"
+        "OCR'd document. Follow the output format exactly.\n\n"
         f"Output format instructions:\n{schema}"
     )
     user_prompt = catalog_entry_to_prompt_text(catalog_entry)
