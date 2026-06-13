@@ -6,11 +6,12 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
 
-from blob_client import BlobClient, BlobConfigError
+from blob_client import BlobClient, BlobConfigError, DocGeneratedBlobClient
 from doc_catalog import build_catalog
 from keyword_ocr_pipeline import build_keyword_index
 from llm_client import analyze_document_with_llm
 from ocr import analyze_pdf_paragraphs, get_azure_settings
+from pdf_generator import generate_gender_report_pdf
 from pipeline_download import FailedLink, download_pdfs_detailed
 from supabase_client import SupabaseClient, SupabaseConfigError
 
@@ -39,6 +40,55 @@ def _init_blob() -> BlobClient:
         return BlobClient.from_env()
     except BlobConfigError as exc:
         raise RuntimeError(f"Vercel Blob not configured: {exc}") from exc
+
+
+def _generate_and_upload_pdf(
+    chat_id_topic: str,
+    ai_extractions: List[str],
+    documents_processed: int,
+    run_type: str,
+    supabase: SupabaseClient,
+) -> Optional[str]:
+    """
+    Generate PDF report, upload to docs-generated blob store, and save to Supabase.
+    
+    Returns:
+        URL of the uploaded PDF, or None if generation fails
+    """
+    if not ai_extractions:
+        logger.info("No AI extractions available, skipping PDF generation")
+        return None
+    
+    try:
+        # Generate PDF
+        pdf_path = generate_gender_report_pdf(
+            chat_id_topic=chat_id_topic,
+            ai_extractions=ai_extractions,
+            documents_processed=documents_processed,
+            run_type=run_type,
+        )
+        
+        # Upload to docs-generated blob store
+        doc_blob_client = DocGeneratedBlobClient.from_env()
+        pdf_url = doc_blob_client.upload_pdf_report(pdf_path, chat_id_topic)
+        
+        # Store in Supabase
+        supabase.store_generated_document(
+            chat_id_topic=chat_id_topic,
+            blob_url=pdf_url,
+            filename=f"{chat_id_topic}-report.pdf",
+            document_count=len(ai_extractions),
+        )
+        
+        # Clean up temp file
+        pdf_path.unlink()
+        
+        logger.info(f"PDF report generated and uploaded successfully: {pdf_url}")
+        return pdf_url
+    except Exception as e:
+        logger.error(f"Failed to generate or upload PDF report: {e}")
+        # Don't fail the entire pipeline if PDF generation fails
+        return None
 
 
 def _extract_and_store_documents(
@@ -193,6 +243,15 @@ def _run_pipeline_first(
 
     all_extractions = supabase.get_all_extraction_texts(chat_id_topic)
 
+    # Generate PDF report and upload to docs-generated blob store
+    generated_pdf_url = _generate_and_upload_pdf(
+        chat_id_topic=chat_id_topic,
+        ai_extractions=all_extractions,
+        documents_processed=len(download_result.files),
+        run_type="first",
+        supabase=supabase,
+    )
+
     return {
         "chat_id_topic": chat_id_topic,
         "run": "first",
@@ -202,6 +261,7 @@ def _run_pipeline_first(
         "undownloadable_links": [{"url": f.url, "reason": f.reason} for f in failed_links],
         "blob_links": blob_links,
         "ocr_errors": ocr_errors,
+        "generated_pdf_url": generated_pdf_url,
     }
 
 
@@ -271,6 +331,15 @@ def _run_pipeline_rerun(
 
     all_extractions = supabase.get_all_extraction_texts(chat_id_topic)
 
+    # Generate PDF report and upload to docs-generated blob store
+    generated_pdf_url = _generate_and_upload_pdf(
+        chat_id_topic=chat_id_topic,
+        ai_extractions=all_extractions,
+        documents_processed=len(pdf_paths),
+        run_type="rerun",
+        supabase=supabase,
+    )
+
     return {
         "chat_id_topic": chat_id_topic,
         "run": "rerun",
@@ -280,4 +349,5 @@ def _run_pipeline_rerun(
         "undownloadable_links": [],
         "blob_links": blob_links,
         "ocr_errors": ocr_errors,
+        "generated_pdf_url": generated_pdf_url,
     }

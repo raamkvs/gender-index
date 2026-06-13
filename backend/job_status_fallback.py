@@ -23,6 +23,11 @@ def load_completed_status_from_supabase(chat_id_topic: str) -> Optional[Pipeline
             return None
 
         metadata = supabase.get_pipeline_metadata(chat_id_topic) or {}
+        
+        # Fetch generated PDF URL from database
+        generated_doc = supabase.get_generated_document(chat_id_topic)
+        generated_pdf_url = generated_doc["blob_url"] if generated_doc else None
+        
         return PipelineStatusResponse(
             status="completed",
             chat_id_topic=chat_id_topic,
@@ -36,6 +41,7 @@ def load_completed_status_from_supabase(chat_id_topic: str) -> Optional[Pipeline
                 undownloadable_links=metadata.get("undownloadable_links") or [],
                 blob_links=metadata.get("blob_links") or [],
                 ocr_errors=[],
+                generated_pdf_url=generated_pdf_url,
             ),
         )
     except Exception as exc:

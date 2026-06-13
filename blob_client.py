@@ -62,3 +62,54 @@ class BlobClient:
             url = self.upload_file(pdf_path, pdf_path.name)
             results.append({"url": url, "filename": pdf_path.name})
         return results
+
+
+class DocGeneratedBlobClient:
+    """Client for uploading generated PDF reports to dedicated docs-generated blob store."""
+    
+    def __init__(self, token: str, store_id: str) -> None:
+        self.token = token
+        self.store_id = store_id
+
+    @classmethod
+    def from_env(cls) -> "DocGeneratedBlobClient":
+        """Initialize from environment variables for docs-generated blob store."""
+        token = os.getenv("BLOB_READ_WRITE_TOKEN__DOC_GENERATED", "").strip()
+        store_id = os.getenv("BLOB_STORE_ID_DOC_GENERATED", "").strip()
+        if not token:
+            raise BlobConfigError("BLOB_READ_WRITE_TOKEN__DOC_GENERATED not configured")
+        if not store_id:
+            raise BlobConfigError("BLOB_STORE_ID_DOC_GENERATED not configured")
+        return cls(token, store_id)
+
+    def upload_pdf_report(self, pdf_path: Path, chat_id_topic: str) -> str:
+        """
+        Upload a generated PDF report to the docs-generated blob store.
+        
+        Args:
+            pdf_path: Path to the PDF file to upload
+            chat_id_topic: Session ID to use in filename
+        
+        Returns:
+            Public URL of the uploaded PDF
+        """
+        import vercel_blob
+
+        filename = f"{chat_id_topic}-report.pdf"
+        
+        with pdf_path.open("rb") as fh:
+            result = vercel_blob.put(
+                filename,
+                fh.read(),
+                options={
+                    "token": self.token,
+                    "addRandomSuffix": "true",
+                },
+            )
+        
+        url = result.get("url") if isinstance(result, dict) else getattr(result, "url", None)
+        if not url:
+            raise RuntimeError(f"Blob upload returned no URL: {result!r}")
+        
+        logger.info(f"Uploaded PDF report to docs-generated blob: {url}")
+        return url

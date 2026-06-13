@@ -167,3 +167,62 @@ class SupabaseClient:
             .execute()
         )
         return result.data[0]["id"]
+
+    # ------------------------------------------------------------------
+    # generated_documents
+    # ------------------------------------------------------------------
+
+    def store_generated_document(
+        self,
+        chat_id_topic: str,
+        blob_url: str,
+        filename: str,
+        document_count: int,
+    ) -> str:
+        """
+        Store generated PDF report metadata.
+        
+        Args:
+            chat_id_topic: Session ID
+            blob_url: URL of the uploaded PDF in blob storage
+            filename: Name of the generated PDF file
+            document_count: Number of documents included in the report
+        
+        Returns:
+            The new row ID
+        """
+        result = (
+            self._client.table("generated_documents")
+            .insert(
+                {
+                    "chat_id_topic": chat_id_topic,
+                    "blob_url": blob_url,
+                    "filename": filename,
+                    "document_count": document_count,
+                }
+            )
+            .execute()
+        )
+        return result.data[0]["id"]
+
+    def get_generated_document(self, chat_id_topic: str) -> Optional[Dict[str, Any]]:
+        """
+        Get the most recent generated document for a session.
+        
+        Args:
+            chat_id_topic: Session ID
+        
+        Returns:
+            Document record or None if not found
+        """
+        result = (
+            self._client.table("generated_documents")
+            .select("*")
+            .eq("chat_id_topic", chat_id_topic)
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        if result.data and len(result.data) > 0:
+            return result.data[0]
+        return None
