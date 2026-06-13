@@ -19,7 +19,7 @@ load_dotenv(_ROOT / ".env.local", override=False)
 
 from backend.job_status_fallback import load_completed_status_from_supabase
 from backend.response_delay import wait_for_response_window
-from backend.routers import documents, indexes, keywords, ocr, pipeline, reports, sync
+from backend.routers import documents, indexes, keywords, ocr, pipeline, sync
 from backend.routers.common import build_services
 from backend.schemas import GenderPipelineResponse, PipelineStatusResponse
 from job_manager import get_job_manager
@@ -49,7 +49,6 @@ app.include_router(documents.router, prefix="/api")
 app.include_router(keywords.router, prefix="/api")
 app.include_router(ocr.router, prefix="/api")
 app.include_router(pipeline.router, prefix="/api")
-app.include_router(reports.router, prefix="/api")
 app.include_router(sync.router, prefix="/api")
 
 
@@ -124,10 +123,6 @@ async def health_check(
 
 @app.on_event("startup")
 def startup_check() -> None:
-    es_host = os.getenv("ES_HOST", "").strip()
-    if not es_host:
-        logger.info("ES_HOST not set; skipping Elasticsearch startup check.")
-        return
     try:
         manager = build_services()["manager"]
         healthy = manager.health_check()

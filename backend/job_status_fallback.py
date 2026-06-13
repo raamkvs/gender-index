@@ -6,7 +6,6 @@ from typing import Optional
 
 from backend.schemas import GenderPipelineResponse, PipelineStatusResponse
 from pipeline_service import _build_ai_extractions_response
-from report_urls import build_report_download_url
 from supabase_client import SupabaseClient, SupabaseConfigError
 
 logger = logging.getLogger(__name__)
@@ -28,11 +27,9 @@ def load_completed_status_from_supabase(chat_id_topic: str) -> Optional[Pipeline
         
         # Fetch generated PDF URL and prepend to ai_extractions for chatbot access
         generated_doc = supabase.get_generated_document(chat_id_topic)
-        download_url = (
-            build_report_download_url(chat_id_topic) if generated_doc else None
-        )
+        generated_pdf_url = generated_doc["blob_url"] if generated_doc else None
         ai_extractions = _build_ai_extractions_response(
-            extractions, download_url, "first"
+            extractions, generated_pdf_url, "first"
         )
 
         return PipelineStatusResponse(
@@ -42,7 +39,7 @@ def load_completed_status_from_supabase(chat_id_topic: str) -> Optional[Pipeline
             result=GenderPipelineResponse(
                 chat_id_topic=chat_id_topic,
                 run="first",
-                report_pdf_url=download_url,
+                report_pdf_url=generated_pdf_url,
                 ai_extractions=ai_extractions,
                 documents_processed=len(extractions),
                 total_documents=len(extractions),

@@ -238,6 +238,20 @@ def test_run_gender_pipeline_rerun_no_uploads(tmp_path: Path) -> None:
     assert result["ai_extractions"] == ["Existing extract."]
 
 
+def test_build_ai_extractions_response_prepends_pdf_link() -> None:
+    from pipeline_service import _build_ai_extractions_response
+
+    result = _build_ai_extractions_response(
+        ["Doc A extract.", "Doc B extract."],
+        "https://blob.vercel-storage.com/report.pdf",
+        "first",
+    )
+    assert result[0] == (
+        "Gender Reviewer Report — Download PDF: https://blob.vercel-storage.com/report.pdf"
+    )
+    assert result[1:] == ["Doc A extract.", "Doc B extract."]
+
+
 def test_run_gender_pipeline_rerun_returns_combined_extractions(tmp_path: Path) -> None:
     fake_pdf = tmp_path / "upload.pdf"
     fake_pdf.write_bytes(b"%PDF-1.4 uploaded")

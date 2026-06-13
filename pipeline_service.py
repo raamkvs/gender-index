@@ -13,7 +13,6 @@ from llm_client import analyze_document_with_llm
 from ocr import analyze_pdf_paragraphs, get_azure_settings
 from pdf_generator import generate_gender_report_pdf
 from pipeline_download import FailedLink, download_pdfs_detailed
-from report_urls import build_report_download_url
 from supabase_client import SupabaseClient, SupabaseConfigError
 
 logger = logging.getLogger(__name__)
@@ -86,24 +85,23 @@ def _generate_and_upload_pdf(
             run_type=run_type,
         )
         
-        # Upload to docs-generated blob store (private store supported)
+        # Upload to docs-generated blob store
         doc_blob_client = DocGeneratedBlobClient.from_env()
-        blob_url = doc_blob_client.upload_pdf_report(pdf_path, chat_id_topic)
-
+        pdf_url = doc_blob_client.upload_pdf_report(pdf_path, chat_id_topic)
+        
         # Store in Supabase
         supabase.store_generated_document(
             chat_id_topic=chat_id_topic,
-            blob_url=blob_url,
+            blob_url=pdf_url,
             filename=f"{chat_id_topic}-report.pdf",
             document_count=len(ai_extractions),
         )
-
+        
         # Clean up temp file
         pdf_path.unlink()
-
-        download_url = build_report_download_url(chat_id_topic)
-        logger.info("PDF report ready at %s (blob: %s)", download_url, blob_url)
-        return download_url
+        
+        logger.info(f"PDF report generated and uploaded successfully: {pdf_url}")
+        return pdf_url
     except Exception as e:
         logger.error(f"Failed to generate or upload PDF report: {e}")
         # Don't fail the entire pipeline if PDF generation fails
@@ -303,16 +301,14 @@ def _run_pipeline_rerun(
     if not unprocessed:
         all_extractions = supabase.get_all_extraction_texts(chat_id_topic)
         generated_doc = supabase.get_generated_document(chat_id_topic)
-        download_url = (
-            build_report_download_url(chat_id_topic) if generated_doc else None
-        )
+        generated_pdf_url = generated_doc["blob_url"] if generated_doc else None
         ai_extractions = _build_ai_extractions_response(
-            all_extractions, download_url, "rerun"
+            all_extractions, generated_pdf_url, "rerun"
         )
         return {
             "chat_id_topic": chat_id_topic,
             "run": "rerun",
-            "report_pdf_url": download_url,
+            "report_pdf_url": generated_pdf_url,
             "ai_extractions": ai_extractions,
             "documents_processed": 0,
             "total_documents": len(all_extractions),
