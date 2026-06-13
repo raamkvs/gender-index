@@ -60,14 +60,14 @@ After deployment:
 2. **Test the pipeline**:
    - Run a pipeline with `POST /api/pipeline/analyze`
    - Poll with `GET /health?chat_id={chat_id_topic}`
-   - Verify the response includes the PDF link as the first `ai_extractions` entry
+   - Verify the response includes `report_pdf_url`
 
 3. **Check Supabase**:
    - Verify row was created in `generated_documents` table
    - Confirm `blob_url` is populated
 
 4. **Test PDF download**:
-   - Open the URL from `result.ai_extractions[0]` in a browser
+   - Open `result.report_pdf_url` in a browser
    - Verify PDF contains expected content
 
 ## 6. Rollback Plan (if needed)

@@ -42,23 +42,6 @@ def _init_blob() -> BlobClient:
         raise RuntimeError(f"Vercel Blob not configured: {exc}") from exc
 
 
-def _build_ai_extractions_response(
-    extraction_texts: List[str],
-    pdf_url: Optional[str],
-    run_type: str,
-) -> List[str]:
-    """Prepend the generated PDF download link as the first ai_extractions entry."""
-    if not pdf_url:
-        return extraction_texts
-    report_label = (
-        "Gender Reviewer Report (Updated)"
-        if run_type == "rerun"
-        else "Gender Reviewer Report"
-    )
-    link_entry = f"{report_label} — Download PDF: {pdf_url}"
-    return [link_entry, *extraction_texts]
-
-
 def _generate_and_upload_pdf(
     chat_id_topic: str,
     ai_extractions: List[str],
@@ -261,26 +244,24 @@ def _run_pipeline_first(
     all_extractions = supabase.get_all_extraction_texts(chat_id_topic)
 
     # Generate PDF report and upload to docs-generated blob store
-    generated_pdf_url = _generate_and_upload_pdf(
+    report_pdf_url = _generate_and_upload_pdf(
         chat_id_topic=chat_id_topic,
         ai_extractions=all_extractions,
         documents_processed=len(download_result.files),
         run_type="first",
         supabase=supabase,
     )
-    ai_extractions = _build_ai_extractions_response(
-        all_extractions, generated_pdf_url, "first"
-    )
 
     return {
         "chat_id_topic": chat_id_topic,
         "run": "first",
-        "ai_extractions": ai_extractions,
+        "ai_extractions": all_extractions,
         "documents_processed": len(download_result.files),
         "total_documents": len(all_extractions),
         "undownloadable_links": [{"url": f.url, "reason": f.reason} for f in failed_links],
         "blob_links": blob_links,
         "ocr_errors": ocr_errors,
+        "report_pdf_url": report_pdf_url,
     }
 
 
@@ -300,19 +281,17 @@ def _run_pipeline_rerun(
     if not unprocessed:
         all_extractions = supabase.get_all_extraction_texts(chat_id_topic)
         generated_doc = supabase.get_generated_document(chat_id_topic)
-        generated_pdf_url = generated_doc["blob_url"] if generated_doc else None
-        ai_extractions = _build_ai_extractions_response(
-            all_extractions, generated_pdf_url, "rerun"
-        )
+        report_pdf_url = generated_doc["blob_url"] if generated_doc else None
         return {
             "chat_id_topic": chat_id_topic,
             "run": "rerun",
-            "ai_extractions": ai_extractions,
+            "ai_extractions": all_extractions,
             "documents_processed": 0,
             "total_documents": len(all_extractions),
             "undownloadable_links": [],
             "blob_links": [],
             "ocr_errors": [],
+            "report_pdf_url": report_pdf_url,
         }
 
     # Download each unprocessed file from Blob
@@ -356,24 +335,22 @@ def _run_pipeline_rerun(
     all_extractions = supabase.get_all_extraction_texts(chat_id_topic)
 
     # Generate PDF report and upload to docs-generated blob store
-    generated_pdf_url = _generate_and_upload_pdf(
+    report_pdf_url = _generate_and_upload_pdf(
         chat_id_topic=chat_id_topic,
         ai_extractions=all_extractions,
         documents_processed=len(pdf_paths),
         run_type="rerun",
         supabase=supabase,
     )
-    ai_extractions = _build_ai_extractions_response(
-        all_extractions, generated_pdf_url, "rerun"
-    )
 
     return {
         "chat_id_topic": chat_id_topic,
         "run": "rerun",
-        "ai_extractions": ai_extractions,
+        "ai_extractions": all_extractions,
         "documents_processed": len(pdf_paths),
         "total_documents": len(all_extractions),
         "undownloadable_links": [],
         "blob_links": blob_links,
         "ocr_errors": ocr_errors,
+        "report_pdf_url": report_pdf_url,
     }
