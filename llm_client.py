@@ -175,7 +175,6 @@ def _call_llm(
             },
         ],
         "store": False,
-        "max_tokens": 4096,  # Ensure sufficient tokens for response
         "temperature": 0.7,  # Balanced creativity
     }
 
