@@ -118,38 +118,39 @@ def generate_gender_report_pdf(
     elements.append(PageBreak())
     
     # Documents Section
-    elements.append(Paragraph("Policy Documents", heading_style))
-    elements.append(Spacer(1, 0.2 * inch))
+    elements.append(Paragraph("Gender Provisions by Document", heading_style))
+    elements.append(Spacer(1, 0.3 * inch))
     
     for idx, document in enumerate(documents, 1):
         filename = document.get('filename', 'Unknown Document')
         blob_url = document.get('blob_url', '')
-        ai_extraction = document.get('ai_extraction', 'No extraction available')
+        ai_extraction = document.get('ai_extraction', 'No provision available')
         
-        # Document title with blob link
-        if blob_url:
-            doc_title_html = f'<b>{idx}. {filename}</b><br/><font color="#0066cc"><u>{blob_url}</u></font>'
-        else:
-            doc_title_html = f'<b>{idx}. {filename}</b><br/><i>No blob link available</i>'
+        # Document name (without number, cleaner format)
+        # Remove file extension if present
+        doc_name = filename.replace('.pdf', '').replace('.PDF', '')
+        doc_name_html = f'<b>{doc_name}</b>'
         
-        elements.append(Paragraph(doc_title_html, subheading_style))
+        elements.append(Paragraph(doc_name_html, subheading_style))
         elements.append(Spacer(1, 0.1 * inch))
         
-        # Clean and format the extraction text
-        extraction_cleaned = (
+        # Clean and format the provision text
+        # Keep newlines as paragraph breaks for better readability
+        provision_cleaned = (
             ai_extraction
             .replace('&', '&amp;')
             .replace('<', '&lt;')
             .replace('>', '&gt;')
-            .replace('\n', '<br/>')
+            .replace('\n\n', '<br/><br/>')  # Double newlines become paragraph breaks
+            .replace('\n', ' ')  # Single newlines become spaces
         )
         
-        # Truncate very long extractions
-        if len(extraction_cleaned) > 8000:
-            extraction_cleaned = extraction_cleaned[:8000] + "...<br/><i>[Excerpt truncated for brevity]</i>"
+        # Add blob link at the end of the provision if available
+        if blob_url:
+            provision_cleaned += f'<br/><br/><font color="#0066cc" size="9"><u>{blob_url}</u></font>'
         
-        elements.append(Paragraph(extraction_cleaned, body_style))
-        elements.append(Spacer(1, 0.3 * inch))
+        elements.append(Paragraph(provision_cleaned, body_style))
+        elements.append(Spacer(1, 0.4 * inch))
     
     # Failed Downloads Section (if any)
     if undownloadable_links:
