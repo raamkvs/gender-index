@@ -281,7 +281,6 @@ def _run_pipeline_first(
         "undownloadable_links": [{"url": f.url, "reason": f.reason} for f in failed_links],
         "blob_links": blob_links,
         "ocr_errors": ocr_errors,
-        "generated_pdf_url": generated_pdf_url,
     }
 
 
@@ -314,7 +313,6 @@ def _run_pipeline_rerun(
             "undownloadable_links": [],
             "blob_links": [],
             "ocr_errors": [],
-            "generated_pdf_url": generated_pdf_url,
         }
 
     # Download each unprocessed file from Blob
@@ -378,5 +376,4 @@ def _run_pipeline_rerun(
         "undownloadable_links": [],
         "blob_links": blob_links,
         "ocr_errors": ocr_errors,
-        "generated_pdf_url": generated_pdf_url,
     }

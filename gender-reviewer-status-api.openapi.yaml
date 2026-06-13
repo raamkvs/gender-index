@@ -111,14 +111,9 @@ components:
           items:
             type: string
           description: >
-            AI-extracted gender-related provisions. The first entry is the generated PDF
-            report download link (format "Gender Reviewer Report — Download PDF: {url}").
-            Remaining entries are one per processed document.
-        generated_pdf_url:
-          type: string
-          format: uri
-          nullable: true
-          description: Direct URL to the generated PDF report (also included as the first ai_extractions entry).
+            Pipeline output. The first entry is the generated PDF report download link
+            (format "Gender Reviewer Report — Download PDF: {url}"). Remaining entries
+            are one per processed document.
         documents_processed:
           type: integer
         total_documents:

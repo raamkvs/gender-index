@@ -45,7 +45,6 @@ def load_completed_status_from_supabase(chat_id_topic: str) -> Optional[Pipeline
                 undownloadable_links=metadata.get("undownloadable_links") or [],
                 blob_links=metadata.get("blob_links") or [],
                 ocr_errors=[],
-                generated_pdf_url=generated_pdf_url,
             ),
         )
     except Exception as exc:
