@@ -107,13 +107,13 @@ class GenderPipelineRequest(BaseModel):
 class GenderPipelineResponse(BaseModel):
     chat_id_topic: str
     run: str
+    report_pdf_url: Optional[str] = None
     ai_extractions: List[str]
     documents_processed: int
     total_documents: int
     undownloadable_links: List[FailedLink]
     blob_links: List[BlobLink]
     ocr_errors: List[OCRError] = []
-    report_pdf_url: Optional[str] = None
 
 
 class GenderPipelineAcceptedResponse(BaseModel):
