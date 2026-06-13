@@ -150,13 +150,17 @@ When `result.report_pdf_url` is present:
 
 ### PDF Report Contents
 
-The PDF report already includes:
-- Executive Summary
-- Document Overview
-- Gender Provisions Found (one section per extraction)
-- Gender Gaps Identified
-- Framework Alignment (CEDAW, Beijing Platform for Action, SDG 5)
-- Recommendations
+The PDF report is automatically generated with professional formatting and includes:
+- **Title page** with session ID and metadata
+- **Gender Provisions by Document** - Each document is formatted with:
+  - Document title (extracted from content or filename)
+  - Full citation in bold
+  - Gender-related provisions with italicized key terms
+  - Structured sub-sections with (a), (b), (c) formatting
+  - Source document blob URL
+- **Failed Downloads** section (if applicable)
+
+The PDF uses markdown-style formatting with proper headers, bold citations, and italic emphasis on gender-related terms for easy readability.
 
 Your chat summary should complement the PDF, not replace it. Keep the summary concise; direct the user to the PDF for the full report.
 
@@ -186,8 +190,8 @@ Your chat summary should complement the PDF, not replace it. Keep the summary co
     "report_pdf_url": "https://blob.vercel-storage.com/bangladesh-gender-policy-12-12-2026-22-30-30-report-xyz123.pdf",
     "ai_extractions": [
       "Gender Reviewer Report — Download PDF: https://blob.vercel-storage.com/...",
-      "Document 1: The National Gender Policy (2023) includes provisions for women's participation in decision-making bodies with a target of 30% representation...",
-      "Document 2: The Five-Year Plan addresses gender gaps in education and employment, with specific budget allocations for girls' education programs..."
+      "### National Gender Policy 2023\n\n**Bangladesh National Gender Policy. Adopted 2023. Section 4.2.**\n\nThe policy includes provisions for *women's participation* in decision-making bodies with a target of 30% representation in all government committees and advisory boards. Special measures will be taken to ensure *equal opportunities* for *women* in leadership positions.",
+      "### Eighth Five-Year Plan 2021-2025\n\n**Government of Bangladesh. Eighth Five-Year Plan. Chapter 7: Gender and Development.**\n\nThe plan addresses gender gaps in education and employment, with specific budget allocations for *girls' education* programs and initiatives to promote *women's entrepreneurship*..."
     ],
     "documents_processed": 2,
     "total_documents": 2,
