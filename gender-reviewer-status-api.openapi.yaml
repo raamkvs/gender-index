@@ -31,7 +31,7 @@ paths:
         1. Call this endpoint with `chat_id` set to the session's `chat_id_topic`.
         2. Wait for the response (10–25 seconds per call).
         3. If `status` is `in_progress` or `pending` and `comments` is `wait`, pause for ~10 seconds and call again.
-        4. If `status` is `completed`, read the results from the `result` object (specifically `result.ai_extractions`).
+        4. If `status` is `completed`, read the results from the `result` object. The first entry in `result.ai_extractions` is the generated PDF download link; remaining entries are per-document AI extractions.
         5. If `status` is `failed`, stop polling and surface the `error` field to the user.
       x-ms-summary: Track gender analysis background job progress and retrieve completed data.
       parameters:
@@ -110,7 +110,15 @@ components:
           type: array
           items:
             type: string
-          description: AI-extracted gender-related provisions, one entry per document.
+          description: >
+            AI-extracted gender-related provisions. The first entry is the generated PDF
+            report download link (format "Gender Reviewer Report — Download PDF: {url}").
+            Remaining entries are one per processed document.
+        generated_pdf_url:
+          type: string
+          format: uri
+          nullable: true
+          description: Direct URL to the generated PDF report (also included as the first ai_extractions entry).
         documents_processed:
           type: integer
         total_documents:

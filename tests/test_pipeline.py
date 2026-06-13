@@ -218,6 +218,7 @@ def test_run_gender_pipeline_rerun_no_uploads(tmp_path: Path) -> None:
     mock_supabase = MagicMock()
     mock_supabase.get_unprocessed_uploads.return_value = []
     mock_supabase.get_all_extraction_texts.return_value = ["Existing extract."]
+    mock_supabase.get_generated_document.return_value = None
     mock_blob = MagicMock()
 
     with (
@@ -235,6 +236,20 @@ def test_run_gender_pipeline_rerun_no_uploads(tmp_path: Path) -> None:
     assert result["run"] == "rerun"
     assert result["documents_processed"] == 0
     assert result["ai_extractions"] == ["Existing extract."]
+
+
+def test_build_ai_extractions_response_prepends_pdf_link() -> None:
+    from pipeline_service import _build_ai_extractions_response
+
+    result = _build_ai_extractions_response(
+        ["Doc A extract.", "Doc B extract."],
+        "https://blob.vercel-storage.com/report.pdf",
+        "first",
+    )
+    assert result[0] == (
+        "Gender Reviewer Report — Download PDF: https://blob.vercel-storage.com/report.pdf"
+    )
+    assert result[1:] == ["Doc A extract.", "Doc B extract."]
 
 
 def test_run_gender_pipeline_rerun_returns_combined_extractions(tmp_path: Path) -> None:
