@@ -78,9 +78,11 @@ def get_gpt54_settings() -> GPT54Settings:
 
 
 def _extract_response_text(payload: Dict[str, Any]) -> str:
+    # Check for explicit output_text field
     if isinstance(payload.get("output_text"), str) and payload["output_text"].strip():
         return payload["output_text"].strip()
 
+    # Parse output array (Azure AI Foundry format)
     chunks: List[str] = []
     for item in payload.get("output", []) or []:
         if not isinstance(item, dict):
@@ -100,11 +102,13 @@ def _extract_response_text(payload: Dict[str, Any]) -> str:
     if chunks:
         return "\n".join(chunks)
 
+    # Try direct text/content/message keys
     for key in ("text", "content", "message"):
         value = payload.get(key)
         if isinstance(value, str) and value.strip():
             return value.strip()
 
+    # Try OpenAI-style choices format
     choices = payload.get("choices")
     if isinstance(choices, list) and choices:
         first = choices[0]
@@ -115,7 +119,26 @@ def _extract_response_text(payload: Dict[str, Any]) -> str:
                 if isinstance(content, str) and content.strip():
                     return content.strip()
 
-    return json.dumps(payload, indent=2)
+    # Check if there's an error message
+    error_msg = payload.get("error")
+    if error_msg:
+        logger.error(f"LLM API returned error: {error_msg}")
+        raise RuntimeError(f"LLM API error: {error_msg}")
+    
+    # Log the problematic response structure for debugging
+    status = payload.get("status", "unknown")
+    output_tokens = payload.get("usage", {}).get("output_tokens", 0)
+    logger.error(
+        f"Failed to extract text from LLM response. "
+        f"Status: {status}, Output tokens: {output_tokens}, "
+        f"Response keys: {list(payload.keys())}"
+    )
+    
+    # Return a more helpful error message instead of dumping JSON
+    raise RuntimeError(
+        f"LLM returned empty response. Status: {status}, "
+        f"Output tokens: {output_tokens}. Check API configuration and model deployment."
+    )
 
 
 def _resolve_output_schema(output_schema_hint: Optional[str]) -> str:
@@ -152,6 +175,8 @@ def _call_llm(
             },
         ],
         "store": False,
+        "max_tokens": 4096,  # Ensure sufficient tokens for response
+        "temperature": 0.7,  # Balanced creativity
     }
 
     response = requests.post(
@@ -166,6 +191,16 @@ def _call_llm(
         )
 
     payload = response.json()
+    
+    # Log API response details for debugging
+    status = payload.get("status", "unknown")
+    usage = payload.get("usage", {})
+    logger.info(
+        f"LLM API response - Status: {status}, "
+        f"Input tokens: {usage.get('input_tokens', 0)}, "
+        f"Output tokens: {usage.get('output_tokens', 0)}"
+    )
+    
     text = _extract_response_text(payload)
     if not text:
         raise RuntimeError("GPT54 response contained no text output.")
