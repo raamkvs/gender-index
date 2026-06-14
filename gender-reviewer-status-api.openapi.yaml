@@ -136,6 +136,11 @@ components:
           items:
             $ref: "#/components/schemas/OCRError"
           default: []
+        report_pdf_url:
+          type: string
+          format: uri
+          nullable: true
+          description: URL of the generated PDF report containing all extractions (null if report generation failed or is not configured)
 
     FailedLink:
       type: object

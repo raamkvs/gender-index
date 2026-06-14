@@ -154,7 +154,7 @@ def _extract_and_store_documents(
             for m in kw_matches
         ]
 
-        # Build catalog entry with keyword excerpts included for LLM context
+        # Build catalog entry (no longer includes excerpts, just full text)
         catalog_entry = build_catalog(
             chat_id_topic,
             [
@@ -162,18 +162,61 @@ def _extract_and_store_documents(
                     "source_url": source_url or "",
                     "filename": pdf_path.name,
                     "paragraphs": paragraphs,
-                    "relevant_excerpts": relevant_excerpts,
+                    "relevant_excerpts": [],  # Not used anymore
                 }
             ],
         )["documents"][0]
 
         try:
+            # Call AI with keywords
             ai_extraction = analyze_document_with_llm(
-                catalog_entry, output_schema_hint=output_schema_hint
+                catalog_entry,
+                keywords=keywords,
+                output_schema_hint=output_schema_hint
             )
+            
+            # Parse and validate JSON response
+            try:
+                extraction_data = json.loads(ai_extraction)
+                document_name = extraction_data.get("document_name", "Unknown Document")
+                paragraphs_list = extraction_data.get("relevant_paragraphs", [])
+                
+                # Validate structure
+                if not isinstance(paragraphs_list, list):
+                    logger.warning(
+                        "AI response for %s has invalid structure: relevant_paragraphs is not a list",
+                        pdf_path.name
+                    )
+                
+                logger.info(
+                    "Successfully extracted %d paragraphs from %s (document: %s)",
+                    len(paragraphs_list),
+                    pdf_path.name,
+                    document_name[:50] + "..." if len(document_name) > 50 else document_name
+                )
+                
+            except json.JSONDecodeError as json_exc:
+                logger.error(
+                    "Failed to parse AI JSON response for %s: %s. Response: %s",
+                    pdf_path.name,
+                    json_exc,
+                    ai_extraction[:500]
+                )
+                # Create fallback JSON structure
+                ai_extraction = json.dumps({
+                    "document_name": pdf_path.name,
+                    "relevant_paragraphs": [],
+                    "error": f"JSON parsing failed: {json_exc}"
+                })
+                
         except Exception as exc:  # noqa: BLE001
             logger.exception("LLM extraction failed for %s", pdf_path.name)
-            ai_extraction = f"Extraction failed: {exc}"
+            # Store error as JSON
+            ai_extraction = json.dumps({
+                "document_name": pdf_path.name,
+                "relevant_paragraphs": [],
+                "error": f"Extraction failed: {exc}"
+            })
 
         supabase.store_document_extraction(
             chat_id_topic=chat_id_topic,
@@ -376,7 +419,7 @@ def _run_pipeline_rerun(
     # Get all document records and pipeline metadata
     all_documents = supabase.get_all_extractions(chat_id_topic)
     all_extraction_texts = [doc["ai_extraction"] for doc in all_documents]
-    
+
     # Get undownloadable links from pipeline metadata
     pipeline_meta = supabase.get_pipeline_metadata(chat_id_topic)
     undownloadable_list = pipeline_meta.get("undownloadable_links", []) if pipeline_meta else []

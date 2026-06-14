@@ -21,9 +21,18 @@ class BlobClient:
 
     @classmethod
     def from_env(cls) -> "BlobClient":
+        """Create BlobClient for input PDFs using BLOB_READ_WRITE_TOKEN."""
         token = os.getenv("BLOB_READ_WRITE_TOKEN", "").strip()
         if not token:
             raise BlobConfigError("BLOB_READ_WRITE_TOKEN not configured")
+        return cls(token)
+    
+    @classmethod
+    def from_env_report(cls) -> "BlobClient":
+        """Create BlobClient for generated reports using BLOB_READ_WRITE_TOKEN__DOC_GENERATED."""
+        token = os.getenv("BLOB_READ_WRITE_TOKEN__DOC_GENERATED", "").strip()
+        if not token:
+            raise BlobConfigError("BLOB_READ_WRITE_TOKEN__DOC_GENERATED not configured")
         return cls(token)
 
     def upload_file(self, file_path: Path, filename: str) -> str:

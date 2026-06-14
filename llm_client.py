@@ -14,31 +14,34 @@ from doc_catalog import catalog_entry_to_prompt_text
 logger = logging.getLogger(__name__)
 
 DEFAULT_OUTPUT_SCHEMA = """\
-Output format (strict — one document only):
+Output a valid JSON object with this exact structure:
 
-Format your output using this markdown-style structure:
+{
+  "document_name": "Full official document name/citation as it appears in the text",
+  "relevant_paragraphs": [
+    "Full paragraph 1 containing **keyword** with bold formatting...",
+    "Full paragraph 2 containing **keyword** with bold formatting...",
+    ...
+  ]
+}
 
-1. Start with a subsection header: ### {Organization/Treaty Name}
-2. Follow with the full citation in bold: **{Document symbol, title, article/section numbers, year}**
-3. Then provide the extracted provisions in clear paragraphs
-4. Use *italics* (with asterisks) to emphasize key gender-related terms like: women, girls, \
-gender equality, empowerment, indigenous peoples, local communities, rural women, young women, etc.
-5. For articles with sub-sections, use **(a)**, **(b)**, **(c)** formatting
-6. Separate distinct provisions with blank lines
-7. If grouping by theme is needed, use ## {Theme Name} before subsections
-8. If nothing relevant is found, output: ### {Organization Name}\n\n**{Document citation}**\n\nNo relevant gender-related provisions found.
+Rules:
+1. Output must be valid JSON (no additional text before or after the JSON object)
+2. Extract COMPLETE paragraphs that contain or relate to any of the provided keywords
+3. Bold all keyword occurrences using **keyword** markdown format (wrap keywords with double asterisks)
+4. If no relevant content found, return empty array [] for relevant_paragraphs
+5. Document name should include full citation (treaty name, instrument title, document symbol, year, decision/article numbers, etc.)
+6. Each paragraph should be a separate array element
+7. Preserve original paragraph text (no summarization or paraphrasing)
+8. Include context around keywords to ensure paragraphs are meaningful
 
-Example:
-
-### Convention on the Elimination of All Forms of Discrimination against Women (CEDAW)
-
-**CEDAW 1979. Article 14.2.**
-
-States Parties shall take all appropriate measures to eliminate discrimination against *women in rural areas* in order to ensure, on a basis of equality of men and women, that they participate in and benefit from rural development and, in particular, shall ensure to such women the right:
-
-**(a)** To participate in the elaboration and implementation of development planning at all levels.
-
-**(b)** To have access to adequate health care facilities, including information, counselling and services in family planning.
+Example output:
+{
+  "document_name": "Convention on Biological Diversity (CBD) UNEP/CBD/COP/5/23 (2000). V/16. Article 8(j) and related provisions",
+  "relevant_paragraphs": [
+    "Preamble Recognizing the vital role that **women** play in the conservation and sustainable use of biodiversity, and emphasizing that greater attention should be given to strengthening this role and the participation of **women** of indigenous and local communities in the programme of work."
+  ]
+}
 """
 
 
@@ -211,17 +214,32 @@ def _call_llm(
 
 def analyze_document_with_llm(
     catalog_entry: Dict[str, Any],
+    keywords: Optional[List[str]] = None,
     output_schema_hint: Optional[str] = None,
     timeout_seconds: int = 300,
 ) -> str:
     """Run one LLM call for a single catalog document entry."""
     schema = _resolve_output_schema(output_schema_hint)
-    system_prompt = (
-        "You extract gender-related and closely associated provisions from a single "
-        "OCR'd document. Follow the output format exactly.\n\n"
-        f"Output format instructions:\n{schema}"
-    )
-    user_prompt = catalog_entry_to_prompt_text(catalog_entry)
+    
+    # Build system prompt with keywords
+    keywords_list = keywords or []
+    if keywords_list:
+        keywords_str = ", ".join(keywords_list)
+        system_prompt = (
+            f"You extract provisions from a single OCR'd document that relate to ANY of these keywords:\n"
+            f"{keywords_str}\n\n"
+            "For each extracted paragraph, if any of these keywords appear, highlight them using **bold** markdown formatting.\n\n"
+            f"Output format instructions:\n{schema}"
+        )
+    else:
+        # Fallback if no keywords provided
+        system_prompt = (
+            "You extract gender-related and closely associated provisions from a single "
+            "OCR'd document. Follow the output format exactly.\n\n"
+            f"Output format instructions:\n{schema}"
+        )
+    
+    user_prompt = catalog_entry_to_prompt_text(catalog_entry, keywords=keywords_list)
     return _call_llm(system_prompt, user_prompt, timeout_seconds=timeout_seconds)
 
 
@@ -233,6 +251,7 @@ def combine_document_extractions(extractions: List[str]) -> str:
 
 def analyze_all_documents(
     catalog: Dict[str, Any],
+    keywords: Optional[List[str]] = None,
     output_schema_hint: Optional[str] = None,
     timeout_seconds: int = 300,
 ) -> str:
@@ -241,6 +260,7 @@ def analyze_all_documents(
     for entry in catalog.get("documents", []):
         extraction = analyze_document_with_llm(
             entry,
+            keywords=keywords,
             output_schema_hint=output_schema_hint,
             timeout_seconds=timeout_seconds,
         )

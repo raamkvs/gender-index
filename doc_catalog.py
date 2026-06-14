@@ -29,15 +29,15 @@ def build_catalog(
     return {"chat_id": chat_id, "documents": catalog_docs}
 
 
-def catalog_to_prompt_text(catalog: Dict[str, Any]) -> str:
+def catalog_to_prompt_text(catalog: Dict[str, Any], keywords: Optional[List[str]] = None) -> str:
     parts: List[str] = [f"Chat ID: {catalog.get('chat_id', '')}", ""]
     for doc in catalog.get("documents", []):
-        parts.append(catalog_entry_to_prompt_text(doc))
+        parts.append(catalog_entry_to_prompt_text(doc, keywords=keywords))
         parts.append("")
     return "\n".join(parts).strip()
 
 
-def catalog_entry_to_prompt_text(entry: Dict[str, Any]) -> str:
+def catalog_entry_to_prompt_text(entry: Dict[str, Any], keywords: Optional[List[str]] = None) -> str:
     parts: List[str] = [
         f"Document index: {entry.get('doc_index', '')}",
         f"Filename: {entry.get('filename', '')}",
@@ -45,13 +45,14 @@ def catalog_entry_to_prompt_text(entry: Dict[str, Any]) -> str:
     ]
     if entry.get("truncated"):
         parts.append("(Text truncated for model context limits.)")
-    relevant = entry.get("relevant_excerpts") or []
-    if relevant:
+    
+    # Add explicit keywords list instead of excerpts
+    if keywords:
         parts.append("")
-        parts.append("Keyword-matched excerpts:")
-        for excerpt in relevant[:15]:
-            parts.append(f"  - {str(excerpt)[:300]}")
+        parts.append(f"Target keywords: {', '.join(keywords)}")
+    
     parts.append("")
+    parts.append("Full document text:")
     parts.append(str(entry.get("text", "")))
     return "\n".join(parts).strip()
 

@@ -1,13 +1,33 @@
 """PDF report generator for Gender Reviewer pipeline."""
 from __future__ import annotations
 
+import json
 import logging
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_json_extraction(ai_extraction: str) -> Optional[Tuple[str, List[str]]]:
+    """Parse structured JSON extraction into document name and paragraphs."""
+    try:
+        data = json.loads(ai_extraction)
+    except json.JSONDecodeError:
+        return None
+
+    if not isinstance(data, dict):
+        return None
+
+    document_name = str(data.get("document_name", "")).strip()
+    paragraphs = data.get("relevant_paragraphs", [])
+    if not isinstance(paragraphs, list):
+        paragraphs = []
+
+    cleaned_paragraphs = [str(p).strip() for p in paragraphs if str(p).strip()]
+    return document_name, cleaned_paragraphs
 
 
 def _parse_markdown_to_flowables(text: str, styles: Any) -> List[Any]:
@@ -288,36 +308,68 @@ def generate_gender_report_pdf(
     elements.append(Spacer(1, 0.3 * inch))
     
     for idx, document in enumerate(documents, 1):
-        filename = document.get('filename', 'Unknown Document')
-        blob_url = document.get('blob_url', '')
-        ai_extraction = document.get('ai_extraction', 'No provision available')
-        
-        # Add document title as a subheading
-        doc_title = filename.replace('.pdf', '').replace('.PDF', '').replace('-', ' ').replace('_', ' ').upper()
-        elements.append(Paragraph(f'<b>{doc_title}</b>', subheading_style))
-        elements.append(Spacer(1, 0.1 * inch))
-        
-        # Add blob link right after title if available
-        if blob_url:
-            link_style = ParagraphStyle(
-                'Link',
-                parent=styles['BodyText'],
-                fontSize=9,
-                textColor=colors.HexColor('#0066cc'),
-                spaceAfter=12,
+        filename = document.get("filename", "Unknown Document")
+        blob_url = document.get("blob_url", "")
+        source_url = document.get("source_url", "") or blob_url
+        ai_extraction = document.get("ai_extraction", "No provision available")
+
+        parsed = _parse_json_extraction(ai_extraction)
+        if parsed:
+            document_name, paragraphs = parsed
+            doc_title = document_name or filename.replace(".pdf", "").replace(".PDF", "")
+            elements.append(Paragraph(f"<b>{doc_title}</b>", subheading_style))
+            elements.append(Spacer(1, 0.1 * inch))
+
+            if source_url:
+                link_style = ParagraphStyle(
+                    "Link",
+                    parent=styles["BodyText"],
+                    fontSize=9,
+                    textColor=colors.HexColor("#0066cc"),
+                    spaceAfter=12,
+                )
+                safe_url = source_url.replace("&", "&amp;")
+                link_text = f'Source: <link href="{safe_url}" color="blue">{safe_url}</link>'
+                elements.append(Paragraph(link_text, link_style))
+
+            if paragraphs:
+                for paragraph in paragraphs:
+                    provision_elements = _parse_markdown_to_flowables(paragraph, styles)
+                    elements.extend(provision_elements)
+            else:
+                elements.append(
+                    Paragraph(
+                        "<i>No relevant gender-related provisions found.</i>",
+                        body_style,
+                    )
+                )
+        else:
+            # Legacy markdown/plain-text extraction fallback
+            doc_title = (
+                filename.replace(".pdf", "")
+                .replace(".PDF", "")
+                .replace("-", " ")
+                .replace("_", " ")
+                .upper()
             )
-            # Escape the URL for HTML
-            safe_url = blob_url.replace('&', '&amp;')
-            link_text = f'<u>{safe_url}</u>'
-            elements.append(Paragraph(link_text, link_style))
-        
-        # Parse the markdown-formatted extraction into flowable elements
-        provision_elements = _parse_markdown_to_flowables(ai_extraction, styles)
-        
-        # Add all the parsed elements
-        elements.extend(provision_elements)
-        
-        # Add spacing between documents
+            elements.append(Paragraph(f"<b>{doc_title}</b>", subheading_style))
+            elements.append(Spacer(1, 0.1 * inch))
+
+            if blob_url:
+                link_style = ParagraphStyle(
+                    "Link",
+                    parent=styles["BodyText"],
+                    fontSize=9,
+                    textColor=colors.HexColor("#0066cc"),
+                    spaceAfter=12,
+                )
+                safe_url = blob_url.replace("&", "&amp;")
+                link_text = f"<u>{safe_url}</u>"
+                elements.append(Paragraph(link_text, link_style))
+
+            provision_elements = _parse_markdown_to_flowables(ai_extraction, styles)
+            elements.extend(provision_elements)
+
         elements.append(Spacer(1, 0.4 * inch))
     
     # Failed Downloads Section (if any)
