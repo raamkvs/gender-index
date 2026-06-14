@@ -6,6 +6,7 @@ from typing import Optional
 
 from backend.schemas import GenderPipelineResponse, PipelineStatusResponse
 from pipeline_service import _build_ai_extractions_response
+from llm_client import format_extraction_for_api
 from supabase_client import SupabaseClient, SupabaseConfigError
 
 logger = logging.getLogger(__name__)
@@ -19,10 +20,13 @@ def load_completed_status_from_supabase(chat_id_topic: str) -> Optional[Pipeline
         return None
 
     try:
-        extractions = supabase.get_all_extraction_texts(chat_id_topic)
-        if not extractions:
+        rows = supabase.get_all_extractions(chat_id_topic)
+        if not rows:
             return None
 
+        extractions = [
+            format_extraction_for_api(row["ai_extraction"]) for row in rows
+        ]
         metadata = supabase.get_pipeline_metadata(chat_id_topic) or {}
         
         # Fetch generated PDF URL and prepend to ai_extractions for chatbot access

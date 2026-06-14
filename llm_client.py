@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
@@ -93,6 +94,9 @@ def _extract_response_text(payload: Dict[str, Any]) -> str:
     for item in payload.get("output", []) or []:
         if not isinstance(item, dict):
             continue
+        item_type = item.get("type")
+        if item_type == "reasoning":
+            continue
         content = item.get("content")
         if isinstance(content, str) and content.strip():
             chunks.append(content.strip())
@@ -101,9 +105,10 @@ def _extract_response_text(payload: Dict[str, Any]) -> str:
             for part in content:
                 if not isinstance(part, dict):
                     continue
-                text = part.get("text")
-                if isinstance(text, str) and text.strip():
-                    chunks.append(text.strip())
+                for key in ("text", "output_text"):
+                    text = part.get(key)
+                    if isinstance(text, str) and text.strip():
+                        chunks.append(text.strip())
 
     if chunks:
         return "\n".join(chunks)
@@ -153,6 +158,111 @@ def _resolve_output_schema(output_schema_hint: Optional[str]) -> str:
     return DEFAULT_OUTPUT_SCHEMA
 
 
+def parse_llm_json_response(text: str) -> Dict[str, Any]:
+    """Parse JSON from an LLM response, tolerating code fences and leading prose."""
+    cleaned = text.strip()
+    if not cleaned:
+        raise ValueError("Empty LLM response")
+
+    fence_match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", cleaned, re.IGNORECASE)
+    if fence_match:
+        cleaned = fence_match.group(1).strip()
+
+    try:
+        data = json.loads(cleaned)
+        if isinstance(data, dict):
+            return data
+    except json.JSONDecodeError:
+        pass
+
+    start = cleaned.find("{")
+    end = cleaned.rfind("}")
+    if start != -1 and end > start:
+        data = json.loads(cleaned[start : end + 1])
+        if isinstance(data, dict):
+            return data
+
+    raise ValueError(f"Could not parse JSON from LLM response: {cleaned[:200]}")
+
+
+def _infer_document_name(prose: str, filename: str) -> str:
+    first_line = prose.splitlines()[0].strip() if prose else ""
+    if first_line.startswith("###"):
+        return first_line.lstrip("#").strip()
+    if first_line.startswith("**") and first_line.endswith("**"):
+        return first_line.strip("*").strip()
+    if len(first_line) > 20 and len(first_line) < 300:
+        return first_line
+    return filename
+
+
+def _split_prose_paragraphs(prose: str) -> List[str]:
+    blocks = [block.strip() for block in re.split(r"\n\s*\n", prose) if block.strip()]
+    if blocks:
+        return blocks
+    line = prose.strip()
+    return [line] if line else []
+
+
+def normalize_llm_extraction(raw: str, filename: str) -> str:
+    """Normalize LLM output to canonical JSON string for storage and PDF generation."""
+    try:
+        data = parse_llm_json_response(raw)
+    except ValueError:
+        prose = raw.strip()
+        if not prose:
+            data = {
+                "document_name": filename,
+                "relevant_paragraphs": [],
+                "error": "Empty LLM response",
+            }
+        else:
+            data = {
+                "document_name": _infer_document_name(prose, filename),
+                "relevant_paragraphs": _split_prose_paragraphs(prose),
+            }
+
+    document_name = str(data.get("document_name") or filename).strip() or filename
+    paragraphs = data.get("relevant_paragraphs", [])
+    if not isinstance(paragraphs, list):
+        paragraphs = [str(paragraphs)] if paragraphs else []
+    paragraphs = [str(p).strip() for p in paragraphs if str(p).strip()]
+
+    normalized: Dict[str, Any] = {
+        "document_name": document_name,
+        "relevant_paragraphs": paragraphs,
+    }
+    if data.get("error"):
+        normalized["error"] = str(data["error"])
+    return json.dumps(normalized)
+
+
+def format_extraction_for_api(ai_extraction: str) -> str:
+    """Convert stored JSON extraction into readable prose for API/chat consumers."""
+    try:
+        data = json.loads(ai_extraction)
+    except json.JSONDecodeError:
+        return ai_extraction.strip()
+
+    if not isinstance(data, dict):
+        return ai_extraction.strip()
+
+    doc_name = str(data.get("document_name", "Unknown Document")).strip()
+    paragraphs = data.get("relevant_paragraphs") or []
+    error = data.get("error")
+
+    if error and not paragraphs:
+        return f"{doc_name}. Extraction unavailable ({error})."
+    if not paragraphs:
+        return f"{doc_name}. No relevant gender-related provisions found."
+
+    def strip_bold(value: str) -> str:
+        return re.sub(r"\*\*(.+?)\*\*", r"\1", str(value))
+
+    body = " ".join(strip_bold(p) for p in paragraphs if str(p).strip())
+    return f"{doc_name}. {body}"
+
+
 def _call_llm(
     system_prompt: str,
     user_prompt: str,
@@ -181,7 +291,7 @@ def _call_llm(
             },
         ],
         "store": False,
-        "temperature": 0.7,  # Balanced creativity
+        "temperature": 0.2,
     }
 
     response = requests.post(
@@ -240,7 +350,9 @@ def analyze_document_with_llm(
         )
     
     user_prompt = catalog_entry_to_prompt_text(catalog_entry, keywords=keywords_list)
-    return _call_llm(system_prompt, user_prompt, timeout_seconds=timeout_seconds)
+    raw_response = _call_llm(system_prompt, user_prompt, timeout_seconds=timeout_seconds)
+    filename = str(catalog_entry.get("filename") or "document.pdf")
+    return normalize_llm_extraction(raw_response, filename)
 
 
 def combine_document_extractions(extractions: List[str]) -> str:

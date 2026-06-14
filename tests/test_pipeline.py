@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -14,7 +15,14 @@ from doc_catalog import (
     catalog_entry_to_prompt_text,
     catalog_to_prompt_text,
 )
-from llm_client import _extract_response_text, analyze_all_documents, combine_document_extractions
+from llm_client import (
+    _extract_response_text,
+    analyze_all_documents,
+    combine_document_extractions,
+    format_extraction_for_api,
+    normalize_llm_extraction,
+    parse_llm_json_response,
+)
 from pipeline_download import download_pdfs_detailed
 
 
@@ -44,7 +52,7 @@ def test_catalog_entry_to_prompt_text_includes_metadata() -> None:
     assert "hello" in text
 
 
-def test_catalog_entry_includes_relevant_excerpts() -> None:
+def test_catalog_entry_includes_target_keywords() -> None:
     catalog = build_catalog(
         "chat-1",
         [
@@ -52,22 +60,23 @@ def test_catalog_entry_includes_relevant_excerpts() -> None:
                 "source_url": "https://x/a.pdf",
                 "filename": "a.pdf",
                 "paragraphs": ["hello"],
-                "relevant_excerpts": ["gender equality excerpt"],
             }
         ],
     )
-    text = catalog_entry_to_prompt_text(catalog["documents"][0])
-    assert "gender equality excerpt" in text
-    assert "Keyword-matched excerpts" in text
+    text = catalog_entry_to_prompt_text(
+        catalog["documents"][0], keywords=["gender", "policy"]
+    )
+    assert "Target keywords: gender, policy" in text
+    assert "Full document text:" in text
 
 
-def test_catalog_entry_no_excerpts_when_empty() -> None:
+def test_catalog_entry_no_keywords_when_empty() -> None:
     catalog = build_catalog(
         "chat-1",
         [{"source_url": "u", "filename": "a.pdf", "paragraphs": ["hello"]}],
     )
     text = catalog_entry_to_prompt_text(catalog["documents"][0])
-    assert "Keyword-matched excerpts" not in text
+    assert "Target keywords:" not in text
 
 
 # ------------------------------------------------------------------
@@ -115,6 +124,49 @@ def test_extract_response_text_output_array() -> None:
     }
     assert "line one" in _extract_response_text(payload)
     assert "line two" in _extract_response_text(payload)
+
+
+def test_extract_response_text_output_text_field_in_content() -> None:
+    payload = {
+        "output": [
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "output_text": '{"document_name":"A"}'}],
+            }
+        ]
+    }
+    assert _extract_response_text(payload) == '{"document_name":"A"}'
+
+
+def test_parse_llm_json_response_from_code_fence() -> None:
+    raw = '```json\n{"document_name": "Test", "relevant_paragraphs": ["hello"]}\n```'
+    data = parse_llm_json_response(raw)
+    assert data["document_name"] == "Test"
+    assert data["relevant_paragraphs"] == ["hello"]
+
+
+def test_normalize_llm_extraction_from_prose() -> None:
+    normalized = normalize_llm_extraction(
+        "### Convention on Biological Diversity\n\nRecognizing the role of **women**.",
+        "fallback.pdf",
+    )
+    data = json.loads(normalized)
+    assert "Convention on Biological Diversity" in data["document_name"]
+    assert len(data["relevant_paragraphs"]) >= 1
+
+
+def test_format_extraction_for_api_from_json() -> None:
+    payload = json.dumps(
+        {
+            "document_name": "Paris Agreement",
+            "relevant_paragraphs": ["Acknowledging **gender equality**."],
+        }
+    )
+    formatted = format_extraction_for_api(payload)
+    assert formatted.startswith("Paris Agreement.")
+    assert "gender equality" in formatted
+    assert "**" not in formatted
 
 
 # ------------------------------------------------------------------
@@ -178,7 +230,13 @@ def test_run_gender_pipeline_first_full_mock(tmp_path: Path) -> None:
     fake_pdf.write_bytes(b"%PDF-1.4 fake")
 
     mock_supabase = MagicMock()
-    mock_supabase.get_all_extraction_texts.return_value = ["Doc A. Extract about women."]
+    mock_supabase.get_all_extractions.return_value = [
+        {
+            "ai_extraction": '{"document_name":"Doc A","relevant_paragraphs":["Extract about women."]}',
+            "filename": "report.pdf",
+        }
+    ]
+    mock_supabase.get_generated_document.return_value = None
     mock_blob = MagicMock()
     mock_blob.upload_file.return_value = "https://blob.vercel-storage.com/report.pdf"
 
@@ -189,7 +247,11 @@ def test_run_gender_pipeline_first_full_mock(tmp_path: Path) -> None:
         patch("pipeline_service.get_azure_settings", return_value=("https://ep", "key")),
         patch("pipeline_service._load_keywords", return_value=["gender", "women"]),
         patch("pipeline_service.analyze_pdf_paragraphs", return_value=["Women play a vital role."]),
-        patch("pipeline_service.analyze_document_with_llm", return_value="Doc A. Extract about women."),
+        patch(
+            "pipeline_service.analyze_document_with_llm",
+            return_value='{"document_name":"Doc A","relevant_paragraphs":["Extract about women."]}',
+        ),
+        patch("pipeline_service._generate_and_upload_pdf", return_value=None),
         patch("pipeline_service.PIPELINE_DOWNLOAD_ROOT", tmp_path / "pipeline"),
     ):
         from pipeline_download import DetailedDownloadResult
@@ -217,7 +279,9 @@ def test_run_gender_pipeline_first_full_mock(tmp_path: Path) -> None:
 def test_run_gender_pipeline_rerun_no_uploads(tmp_path: Path) -> None:
     mock_supabase = MagicMock()
     mock_supabase.get_unprocessed_uploads.return_value = []
-    mock_supabase.get_all_extraction_texts.return_value = ["Existing extract."]
+    mock_supabase.get_all_extractions.return_value = [
+        {"ai_extraction": "Existing extract.", "filename": "existing.pdf"}
+    ]
     mock_supabase.get_generated_document.return_value = None
     mock_blob = MagicMock()
 
@@ -260,9 +324,9 @@ def test_run_gender_pipeline_rerun_returns_combined_extractions(tmp_path: Path) 
     mock_supabase.get_unprocessed_uploads.return_value = [
         {"id": "uuid-1", "blob_url": "https://blob.vercel/upload.pdf", "filename": "upload.pdf"}
     ]
-    mock_supabase.get_all_extraction_texts.return_value = [
-        "Run 1 extract.",
-        "Run 2 new extract.",
+    mock_supabase.get_all_extractions.return_value = [
+        {"ai_extraction": "Run 1 extract.", "filename": "a.pdf"},
+        {"ai_extraction": '{"document_name":"Upload","relevant_paragraphs":["Run 2 new extract."]}', "filename": "upload.pdf"},
     ]
     mock_blob = MagicMock()
     mock_blob.download_file.return_value = fake_pdf
@@ -273,7 +337,11 @@ def test_run_gender_pipeline_rerun_returns_combined_extractions(tmp_path: Path) 
         patch("pipeline_service.get_azure_settings", return_value=("ep", "key")),
         patch("pipeline_service._load_keywords", return_value=["gender"]),
         patch("pipeline_service.analyze_pdf_paragraphs", return_value=["New paragraph."]),
-        patch("pipeline_service.analyze_document_with_llm", return_value="Run 2 new extract."),
+        patch(
+            "pipeline_service.analyze_document_with_llm",
+            return_value='{"document_name":"Upload","relevant_paragraphs":["Run 2 new extract."]}',
+        ),
+        patch("pipeline_service._generate_and_upload_pdf", return_value=None),
         patch("pipeline_service.PIPELINE_DOWNLOAD_ROOT", tmp_path / "pipeline"),
     ):
         result = __import__("pipeline_service").run_gender_pipeline(
@@ -285,7 +353,7 @@ def test_run_gender_pipeline_rerun_returns_combined_extractions(tmp_path: Path) 
     assert result["run"] == "rerun"
     assert result["documents_processed"] == 1
     assert "Run 1 extract." in result["ai_extractions"]
-    assert "Run 2 new extract." in result["ai_extractions"]
+    assert any("Run 2 new extract." in item for item in result["ai_extractions"])
     mock_supabase.mark_uploads_processed.assert_called_once_with(["uuid-1"])
     mock_supabase.store_document_extraction.assert_called_once()
 
@@ -298,7 +366,10 @@ def test_per_document_storage_called_per_file(tmp_path: Path) -> None:
     fake_b.write_bytes(b"%PDF b")
 
     mock_supabase = MagicMock()
-    mock_supabase.get_all_extraction_texts.return_value = ["A extract.", "B extract."]
+    mock_supabase.get_all_extractions.return_value = [
+        {"ai_extraction": "A extract.", "filename": "a.pdf"},
+        {"ai_extraction": "B extract.", "filename": "b.pdf"},
+    ]
     mock_blob = MagicMock()
     mock_blob.upload_file.return_value = "https://blob.vercel/x.pdf"
 
@@ -309,7 +380,14 @@ def test_per_document_storage_called_per_file(tmp_path: Path) -> None:
         patch("pipeline_service.get_azure_settings", return_value=("ep", "key")),
         patch("pipeline_service._load_keywords", return_value=["gender"]),
         patch("pipeline_service.analyze_pdf_paragraphs", return_value=["paragraph."]),
-        patch("pipeline_service.analyze_document_with_llm", side_effect=["A extract.", "B extract."]),
+        patch(
+            "pipeline_service.analyze_document_with_llm",
+            side_effect=[
+                '{"document_name":"A","relevant_paragraphs":["A extract."]}',
+                '{"document_name":"B","relevant_paragraphs":["B extract."]}',
+            ],
+        ),
+        patch("pipeline_service._generate_and_upload_pdf", return_value=None),
         patch("pipeline_service.PIPELINE_DOWNLOAD_ROOT", tmp_path / "pipeline"),
     ):
         from pipeline_download import DetailedDownloadResult

@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Literal, Optional
 from blob_client import BlobClient, BlobConfigError, DocGeneratedBlobClient
 from doc_catalog import build_catalog
 from keyword_ocr_pipeline import build_keyword_index
-from llm_client import analyze_document_with_llm
+from llm_client import analyze_document_with_llm, format_extraction_for_api
 from ocr import analyze_pdf_paragraphs, get_azure_settings
 from pdf_generator import generate_gender_report_pdf
 from pipeline_download import FailedLink, download_pdfs_detailed
@@ -168,55 +168,29 @@ def _extract_and_store_documents(
         )["documents"][0]
 
         try:
-            # Call AI with keywords
             ai_extraction = analyze_document_with_llm(
                 catalog_entry,
                 keywords=keywords,
-                output_schema_hint=output_schema_hint
+                output_schema_hint=output_schema_hint,
             )
-            
-            # Parse and validate JSON response
-            try:
-                extraction_data = json.loads(ai_extraction)
-                document_name = extraction_data.get("document_name", "Unknown Document")
-                paragraphs_list = extraction_data.get("relevant_paragraphs", [])
-                
-                # Validate structure
-                if not isinstance(paragraphs_list, list):
-                    logger.warning(
-                        "AI response for %s has invalid structure: relevant_paragraphs is not a list",
-                        pdf_path.name
-                    )
-                
-                logger.info(
-                    "Successfully extracted %d paragraphs from %s (document: %s)",
-                    len(paragraphs_list),
-                    pdf_path.name,
-                    document_name[:50] + "..." if len(document_name) > 50 else document_name
-                )
-                
-            except json.JSONDecodeError as json_exc:
-                logger.error(
-                    "Failed to parse AI JSON response for %s: %s. Response: %s",
-                    pdf_path.name,
-                    json_exc,
-                    ai_extraction[:500]
-                )
-                # Create fallback JSON structure
-                ai_extraction = json.dumps({
-                    "document_name": pdf_path.name,
-                    "relevant_paragraphs": [],
-                    "error": f"JSON parsing failed: {json_exc}"
-                })
-                
+            extraction_data = json.loads(ai_extraction)
+            paragraphs_list = extraction_data.get("relevant_paragraphs", [])
+            document_name = extraction_data.get("document_name", pdf_path.name)
+            logger.info(
+                "Successfully extracted %d paragraphs from %s (document: %s)",
+                len(paragraphs_list),
+                pdf_path.name,
+                document_name[:50] + "..." if len(document_name) > 50 else document_name,
+            )
         except Exception as exc:  # noqa: BLE001
             logger.exception("LLM extraction failed for %s", pdf_path.name)
-            # Store error as JSON
-            ai_extraction = json.dumps({
-                "document_name": pdf_path.name,
-                "relevant_paragraphs": [],
-                "error": f"Extraction failed: {exc}"
-            })
+            ai_extraction = json.dumps(
+                {
+                    "document_name": pdf_path.name,
+                    "relevant_paragraphs": [],
+                    "error": f"Extraction failed: {exc}",
+                }
+            )
 
         supabase.store_document_extraction(
             chat_id_topic=chat_id_topic,
@@ -314,7 +288,9 @@ def _run_pipeline_first(
 
     # Get all document records (with filename, blob_url, ai_extraction)
     all_documents = supabase.get_all_extractions(chat_id_topic)
-    all_extraction_texts = [doc["ai_extraction"] for doc in all_documents]
+    all_extraction_texts = [
+        format_extraction_for_api(doc["ai_extraction"]) for doc in all_documents
+    ]
 
     # Generate PDF report and upload to docs-generated blob store
     generated_pdf_url = _generate_and_upload_pdf(
@@ -355,7 +331,10 @@ def _run_pipeline_rerun(
     unprocessed = supabase.get_unprocessed_uploads(chat_id_topic)
 
     if not unprocessed:
-        all_extraction_texts = supabase.get_all_extraction_texts(chat_id_topic)
+        all_documents = supabase.get_all_extractions(chat_id_topic)
+        all_extraction_texts = [
+            format_extraction_for_api(doc["ai_extraction"]) for doc in all_documents
+        ]
         generated_doc = supabase.get_generated_document(chat_id_topic)
         generated_pdf_url = generated_doc["blob_url"] if generated_doc else None
         
@@ -418,7 +397,9 @@ def _run_pipeline_rerun(
 
     # Get all document records and pipeline metadata
     all_documents = supabase.get_all_extractions(chat_id_topic)
-    all_extraction_texts = [doc["ai_extraction"] for doc in all_documents]
+    all_extraction_texts = [
+        format_extraction_for_api(doc["ai_extraction"]) for doc in all_documents
+    ]
 
     # Get undownloadable links from pipeline metadata
     pipeline_meta = supabase.get_pipeline_metadata(chat_id_topic)
