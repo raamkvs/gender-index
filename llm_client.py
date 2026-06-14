@@ -28,13 +28,19 @@ Output a valid JSON object with this exact structure:
 
 Rules:
 1. Output must be valid JSON (no additional text before or after the JSON object)
-2. Extract COMPLETE paragraphs that contain or relate to any of the provided keywords
-3. Bold all keyword occurrences using **keyword** markdown format (wrap keywords with double asterisks)
-4. If no relevant content found, return empty array [] for relevant_paragraphs
-5. Document name should include full citation (treaty name, instrument title, document symbol, year, decision/article numbers, etc.)
-6. Each paragraph should be a separate array element
-7. Preserve original paragraph text (no summarization or paraphrasing)
-8. Include context around keywords to ensure paragraphs are meaningful
+2. Extract COMPLETE body paragraphs from the document that contain substantive policy content related to any of the provided keywords
+3. Each entry must be a full paragraph of continuous prose (typically 2+ sentences, at least ~80 characters) that explains commitments, objectives, measures, rights, obligations, or analysis — not a label or title
+4. Bold all keyword occurrences using **keyword** markdown format (wrap keywords with double asterisks)
+5. If no relevant content found, return empty array [] for relevant_paragraphs
+6. Document name should include full citation (treaty name, instrument title, document symbol, year, decision/article numbers, etc.)
+7. Each paragraph should be a separate array element
+8. Preserve original paragraph wording (no summarization or paraphrasing); copy the full paragraph as it appears in the OCR text, including surrounding sentences for context
+9. Do NOT extract any of the following as relevant_paragraphs:
+   - Section headings, chapter titles, table-of-contents lines, agenda items, or bullet labels (e.g. "EQUIDAD DE GÉNERO", "POLÍTICA FISCAL")
+   - Standalone all-caps titles or short quoted phrases without explanatory prose
+   - Lists of headings joined with dashes, commas, or quotation marks
+   - Single-line labels under ~80 characters that lack a complete sentence
+10. When a heading introduces relevant content, extract the paragraph(s) of body text beneath it — never the heading alone
 
 Example output:
 {
@@ -204,6 +210,40 @@ def _split_prose_paragraphs(prose: str) -> List[str]:
     return [line] if line else []
 
 
+_HEADING_DASH_LIST_RE = re.compile(
+    r'^(\s*"[^"]+"\s*-\s*)+"[^"]+"\s*$',
+    re.IGNORECASE,
+)
+_SENTENCE_END_RE = re.compile(r"[.!?;:]")
+
+
+def _looks_like_heading_only(text: str) -> bool:
+    """Heuristic filter for section titles and TOC fragments mistaken as paragraphs."""
+    cleaned = text.strip().strip('"').strip()
+    if not cleaned:
+        return True
+    if _HEADING_DASH_LIST_RE.match(text.strip()):
+        return True
+
+    letters = [char for char in cleaned if char.isalpha()]
+    if letters:
+        upper_ratio = sum(1 for char in letters if char.isupper()) / len(letters)
+        if upper_ratio >= 0.85 and len(cleaned) < 120:
+            return True
+
+    word_count = len(re.findall(r"\b\w+\b", cleaned, flags=re.UNICODE))
+    has_sentence_end = bool(_SENTENCE_END_RE.search(cleaned))
+    if len(cleaned) < 80 and not has_sentence_end:
+        return True
+    if word_count < 12 and not has_sentence_end:
+        return True
+    return False
+
+
+def _filter_substantive_paragraphs(paragraphs: List[str]) -> List[str]:
+    return [paragraph for paragraph in paragraphs if not _looks_like_heading_only(paragraph)]
+
+
 def normalize_llm_extraction(raw: str, filename: str) -> str:
     """Normalize LLM output to canonical JSON string for storage and PDF generation."""
     try:
@@ -227,6 +267,7 @@ def normalize_llm_extraction(raw: str, filename: str) -> str:
     if not isinstance(paragraphs, list):
         paragraphs = [str(paragraphs)] if paragraphs else []
     paragraphs = [str(p).strip() for p in paragraphs if str(p).strip()]
+    paragraphs = _filter_substantive_paragraphs(paragraphs)
 
     normalized: Dict[str, Any] = {
         "document_name": document_name,
@@ -336,8 +377,11 @@ def analyze_document_with_llm(
     if keywords_list:
         keywords_str = ", ".join(keywords_list)
         system_prompt = (
-            f"You extract provisions from a single OCR'd document that relate to ANY of these keywords:\n"
+            f"You extract substantive policy provisions from a single OCR'd document that relate to ANY of these keywords:\n"
             f"{keywords_str}\n\n"
+            "Return clear, complete paragraphs of body text that convey relevant points, commitments, or insights from the document. "
+            "Do NOT return section headings, chapter titles, table-of-contents entries, or other title-only lines — "
+            "when a heading marks relevant content, extract the explanatory paragraph(s) that follow it instead.\n\n"
             "For each extracted paragraph, if any of these keywords appear, highlight them using **bold** markdown formatting.\n\n"
             f"Output format instructions:\n{schema}"
         )
@@ -345,7 +389,8 @@ def analyze_document_with_llm(
         # Fallback if no keywords provided
         system_prompt = (
             "You extract gender-related and closely associated provisions from a single "
-            "OCR'd document. Follow the output format exactly.\n\n"
+            "OCR'd document. Return full substantive paragraphs with relevant insights — "
+            "never section headings or title-only lines. Follow the output format exactly.\n\n"
             f"Output format instructions:\n{schema}"
         )
     

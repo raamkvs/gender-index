@@ -310,7 +310,7 @@ def generate_gender_report_pdf(
     for idx, document in enumerate(documents, 1):
         filename = document.get("filename", "Unknown Document")
         blob_url = document.get("blob_url", "")
-        source_url = document.get("source_url", "") or blob_url
+        source_url = blob_url or document.get("source_url", "")
         ai_extraction = document.get("ai_extraction", "No provision available")
 
         parsed = _parse_json_extraction(ai_extraction)

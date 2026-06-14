@@ -17,6 +17,7 @@ from doc_catalog import (
 )
 from llm_client import (
     _extract_response_text,
+    _looks_like_heading_only,
     analyze_all_documents,
     combine_document_extractions,
     format_extraction_for_api,
@@ -167,6 +168,38 @@ def test_format_extraction_for_api_from_json() -> None:
     assert formatted.startswith("Paris Agreement.")
     assert "gender equality" in formatted
     assert "**" not in formatted
+
+
+def test_looks_like_heading_only_detects_titles() -> None:
+    assert _looks_like_heading_only("EQUIDAD DE GÉNERO")
+    assert _looks_like_heading_only(
+        '"EQUIDAD DE GÉNERO" - "POLÍTICA MONETARIA Y FINANCIERA" - "POLÍTICA FISCAL"'
+    )
+
+
+def test_normalize_llm_extraction_filters_heading_fragments() -> None:
+    raw = json.dumps(
+        {
+            "document_name": "PNCL-DH Plan",
+            "relevant_paragraphs": [
+                "EQUIDAD DE GÉNERO",
+                '"EQUIDAD DE GÉNERO" - "POLÍTICA MONETARIA Y FINANCIERA"',
+                "El Plan Nacional reconoce la importancia de la **política** de **género** para reducir brechas estructurales y garantizar la participación de las mujeres en la toma de decisiones públicas.",
+            ],
+        }
+    )
+    normalized = normalize_llm_extraction(raw, "fallback.pdf")
+    data = json.loads(normalized)
+    assert len(data["relevant_paragraphs"]) == 1
+    assert "Plan Nacional" in data["relevant_paragraphs"][0]
+
+
+def test_catalog_entry_prompt_instructs_substantive_paragraphs() -> None:
+    text = catalog_entry_to_prompt_text(
+        {"doc_index": 1, "filename": "a.pdf", "source_url": "https://x/a.pdf", "text": "body"},
+        keywords=["policy", "gender"],
+    )
+    assert "not section headings" in text.lower()
 
 
 # ------------------------------------------------------------------

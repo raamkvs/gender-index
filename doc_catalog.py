@@ -50,6 +50,10 @@ def catalog_entry_to_prompt_text(entry: Dict[str, Any], keywords: Optional[List[
     if keywords:
         parts.append("")
         parts.append(f"Target keywords: {', '.join(keywords)}")
+        parts.append(
+            "Extract complete body paragraphs that discuss these topics — not section headings, "
+            "chapter titles, or table-of-contents lines."
+        )
     
     parts.append("")
     parts.append("Full document text:")
