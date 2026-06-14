@@ -372,6 +372,20 @@ def generate_gender_report_pdf(
 
         elements.append(Spacer(1, 0.4 * inch))
     
+    # Failed Downloads Section (if any) - list URLs only without reasons
+    if undownloadable_links:
+        elements.append(PageBreak())
+        elements.append(Paragraph("Failed Downloads", heading_style))
+        elements.append(Spacer(1, 0.2 * inch))
+        
+        failed_text = "The following documents could not be downloaded:<br/><br/>"
+        elements.append(Paragraph(failed_text, body_style))
+        
+        for failed in undownloadable_links:
+            url = failed.get('url', 'Unknown URL')
+            failed_item = f'<b>URL:</b> {url}<br/><br/>'
+            elements.append(Paragraph(failed_item, body_style))
+    
     # Build PDF
     try:
         doc.build(elements)
