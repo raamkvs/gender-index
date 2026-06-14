@@ -1,6 +1,7 @@
 """Download PDFs from URLs with per-link failure reporting."""
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Tuple
@@ -9,6 +10,8 @@ from urllib.parse import urlparse
 import requests
 
 from keyword_ocr_pipeline import ensure_output_dir
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -37,16 +40,48 @@ def derive_filename(url: str, index: int) -> str:
     return name
 
 
+def is_valid_pdf_file(file_path: Path) -> bool:
+    """Check if a file is a valid PDF by examining magic bytes."""
+    try:
+        with file_path.open("rb") as f:
+            header = f.read(1024)
+            if not header:
+                return False
+            # PDF files must start with %PDF-
+            if not header.startswith(b"%PDF-"):
+                return False
+            # Check for common HTML patterns (indicates webpage instead of PDF)
+            html_markers = [b"<!DOCTYPE", b"<html", b"<HTML", b"<head", b"<body"]
+            if any(marker in header for marker in html_markers):
+                return False
+            return True
+    except Exception:
+        return False
+
+
 def stream_download_with_reason(url: str, dest: Path, timeout: int = 120) -> Tuple[bool, str]:
     try:
         with requests.get(url, stream=True, timeout=timeout) as response:
             if response.status_code != 200:
                 return False, f"HTTP {response.status_code}"
+            
+            # Check Content-Type header if available
+            content_type = response.headers.get("Content-Type", "").lower()
+            if content_type and "html" in content_type:
+                logger.warning(f"URL {url} returned HTML content (Content-Type: {content_type})")
+                return False, f"Non-PDF content type: {content_type}"
 
             with dest.open("wb") as file_handle:
                 for chunk in response.iter_content(chunk_size=64 * 1024):
                     if chunk:
                         file_handle.write(chunk)
+            
+            # Validate the downloaded file is actually a PDF
+            if not is_valid_pdf_file(dest):
+                logger.warning(f"Downloaded file {dest.name} is not a valid PDF (failed magic byte check)")
+                dest.unlink()  # Remove invalid file
+                return False, "Not a valid PDF file (HTML page or corrupted)"
+            
             return True, ""
     except requests.Timeout:
         return False, "Request timed out"

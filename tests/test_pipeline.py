@@ -24,7 +24,7 @@ from llm_client import (
     normalize_llm_extraction,
     parse_llm_json_response,
 )
-from pipeline_download import download_pdfs_detailed
+from pipeline_download import download_pdfs_detailed, is_valid_pdf_file
 
 
 # ------------------------------------------------------------------
@@ -227,7 +227,8 @@ def test_download_pdfs_detailed_success(tmp_path: Path) -> None:
     with patch("pipeline_download.requests.get") as mock_get:
         mock_response = MagicMock()
         mock_response.status_code = 200
-        mock_response.iter_content = MagicMock(return_value=[b"%PDF-1.4", b"content"])
+        mock_response.headers = {"Content-Type": "application/pdf"}
+        mock_response.iter_content = MagicMock(return_value=[b"%PDF-1.4", b" content"])
         mock_response.__enter__ = MagicMock(return_value=mock_response)
         mock_response.__exit__ = MagicMock(return_value=False)
         mock_get.return_value = mock_response
@@ -237,6 +238,42 @@ def test_download_pdfs_detailed_success(tmp_path: Path) -> None:
     assert result.downloaded == 1
     assert len(result.files) == 1
     assert result.url_by_file[result.files[0].name] == "https://example.com/report.pdf"
+
+
+def test_download_pdfs_detailed_rejects_html(tmp_path: Path) -> None:
+    with patch("pipeline_download.requests.get") as mock_get:
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.headers = {"Content-Type": "text/html"}
+        mock_response.iter_content = MagicMock(return_value=[b"<!DOCTYPE html><html><body>"])
+        mock_response.__enter__ = MagicMock(return_value=mock_response)
+        mock_response.__exit__ = MagicMock(return_value=False)
+        mock_get.return_value = mock_response
+
+        result = download_pdfs_detailed(tmp_path, ["https://example.com/page.pdf"])
+
+    assert result.failed == 1
+    assert result.downloaded == 0
+    assert len(result.failed_links) == 1
+    assert "html" in result.failed_links[0].reason.lower()
+
+
+def test_is_valid_pdf_file_detects_real_pdf(tmp_path: Path) -> None:
+    pdf_file = tmp_path / "test.pdf"
+    pdf_file.write_bytes(b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n")
+    assert is_valid_pdf_file(pdf_file) is True
+
+
+def test_is_valid_pdf_file_rejects_html(tmp_path: Path) -> None:
+    html_file = tmp_path / "fake.pdf"
+    html_file.write_bytes(b"<!DOCTYPE html><html><head><title>Fake PDF</title></head></html>")
+    assert is_valid_pdf_file(html_file) is False
+
+
+def test_is_valid_pdf_file_rejects_empty(tmp_path: Path) -> None:
+    empty_file = tmp_path / "empty.pdf"
+    empty_file.write_bytes(b"")
+    assert is_valid_pdf_file(empty_file) is False
 
 
 # ------------------------------------------------------------------
