@@ -441,12 +441,12 @@ def _call_llm(
             {
                 "type": "message",
                 "role": "system",
-                "content": [{"type": "input_text", "text": system_prompt}],
+                "content": system_prompt,
             },
             {
                 "type": "message",
                 "role": "user",
-                "content": [{"type": "input_text", "text": user_prompt}],
+                "content": user_prompt,
             },
         ],
         "store": False,
