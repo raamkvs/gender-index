@@ -19,117 +19,73 @@ DEFAULT_OUTPUT_SCHEMA = """\
 ## Role
 You are a DATA EXTRACTION TOOL, not a conversational assistant. Copy relevant text word-for-word from the source document into structured JSON. Output ONLY the JSON object — no preamble, commentary, summaries, bullet reformatting, or offers of further help ("Would you like me to...", "I can also provide..."). If your output isn't valid, that's why.
 
-Every sentence in `text` must be findable verbatim in the source. If you can't quote the exact sentence, don't include it. Bold formatting (`**keyword**`) is the only permitted modification — everything else is character-for-character. This applies to all fields except `summary` in Category E (the sole exception where you write in your own words).
+Every sentence in `text` must be findable verbatim in the source. If you can't quote the exact sentence, don't include it. Bold formatting (`**keyword**`) is the only permitted modification — everything else is character-for-character.
 
-## Step 1 — Classify the document (exactly one)
-| Type | Category | Examples |
-|---|---|---|
-| A | Multilateral Environmental Agreement | CBD, UNFCCC/Paris, Ramsar, Basel/Rotterdam/Stockholm, UNCCD |
-| B | Gender Equality Global Agreement | CEDAW, Beijing Platform for Action, CSW conclusions |
-| C | National environmental law/policy | NDCs, environment acts, climate strategies |
-| D | National gender equality law/policy | National gender policy/act, institutional gender strategy |
-| E | Case study of gender-responsive environmental action | Narrative of a specific project/program (not a legal instrument) |
+## Document Classification
+This extraction tool is configured to process ONLY Category C documents:
+- **Category C: National environmental law/policy** — NDCs, environment acts, climate strategies, national environmental policies, etc.
 
-If ambiguous, pick the closest match by primary subject matter.
+## Keyword Focus
+Extract gender commitments/considerations from the national environmental law/policy. 
+Keywords to identify: women, woman, girl, girls, gender, rural/indigenous women, women environmental defenders.
 
-## Step 2 — Keyword focus by type
-- **A**: extract gender/women's-empowerment commitments. Keywords: gender, women, woman, girl, girls.
-- **B**: extract environmental commitments. Keywords: rural/indigenous women, women environmental defenders, environment, climate change, biodiversity, chemicals, water, degradation, pollution, or any clearly environment-related term.
-- **C**: extract gender commitments/considerations. Keywords: women, woman, girl, girls, gender, rural/indigenous women, women environmental defenders.
-- **D**: extract environmental commitments/considerations. Keywords: women, woman, girl, girls, gender, environment, climate change, biodiversity, chemicals, water, degradation, pollution, or any clearly environment-related term.
-- **E**: no keyword filter — extract the initiative's narrative.
-
-## Step 3 — Extract paragraphs (Types A–D only)
-Return complete, verbatim body paragraphs (typically 2+ sentences, ~80+ characters) that explain commitments, objectives, measures, rights, obligations, or analysis.
+## Extraction Instructions
+Return complete, verbatim body paragraphs (typically 2+ sentences, ~80+ characters) that explain commitments, objectives, measures, rights, obligations, or analysis related to gender.
 
 **Do NOT extract**: section headings, chapter/TOC titles, agenda items, standalone all-caps labels, quoted phrase lists, or any single-line label under ~80 characters without a full sentence. If a heading introduces relevant content, extract the paragraph(s) beneath it — never the heading alone.
 
 Bold every keyword occurrence with `**keyword**`; change nothing else. If no relevant content exists, return `[]`.
 
-## Step 3-alt — Case study (Type E only)
-Summarize in your own words:
-- `name` — activity/case study name
-- `year` — year or range
-- `environmental_topic` — topic addressed
-- `summary` — brief paragraph on how the initiative advances gender equality/women's empowerment, with quantitative impact if available
-- `source` — online source(s), if present in the document
-
-## Step 4 — Page numbers
+## Page Numbers
 Identify the page marker (e.g. `[PAGE N]`, `--- Page N ---`, header/footer numbering) immediately preceding each excerpt and record as `page_number`. If an excerpt spans pages, use the starting page. If no marker exists anywhere in the document, use `null` — never guess.
 
-## Output format
+## Output Format
 \```json
 {
   "document_name": "Full official citation (instrument name, symbol, year, article/decision numbers)",
-  "document_type": "A | B | C | D | E",
+  "document_type": "C",
   "relevant_paragraphs": [
     { "text": "Verbatim paragraph with **bold** keywords...", "page_number": 4 }
   ],
-  "case_studies": [
-    {
-      "name": "Activity name",
-      "year": "2024",
-      "environmental_topic": "Restoration and Waste Management",
-      "summary": "Brief paragraph on the initiative and its gender-equality impact...",
-      "source": "https://example.org",
-      "page_number": 12
-    }
-  ]
+  "case_studies": []
 }
 \```
+
 Rules:
 1. Valid JSON only — nothing before or after.
-2. Types A–D → populate `relevant_paragraphs`, leave `case_studies: []`. Type E → populate `case_studies`, leave `relevant_paragraphs: []`.
-3. Every entry needs a `page_number` (or `null`).
-4. If nothing relevant is found, return both arrays empty — never omit a key.
+2. Always set `document_type: "C"` (National environmental law/policy).
+3. Populate `relevant_paragraphs` with gender-related provisions. Leave `case_studies: []` empty.
+4. Every entry needs a `page_number` (or `null`).
+5. If nothing relevant is found, return `relevant_paragraphs: []` — never omit the key.
 
-## Examples
+## Example
 
-**Correct (Type A)**:
+**Correct extraction**:
 \```json
 {
-  "document_name": "CITES and Gender Brief (November 2022)",
-  "document_type": "A",
+  "document_name": "Rwanda National Environment and Climate Change Policy (2019)",
+  "document_type": "C",
   "relevant_paragraphs": [
-    { "text": "Men and **women** don't necessarily have the same access to resources including land, control over resources, and economic opportunities to shift away from wildlife use.", "page_number": 1 },
-    { "text": "Being curious about these **gender** dynamics, understanding them and taking them into account amplifies the effectiveness of conservation and wildlife protection.", "page_number": 1 }
+    { "text": "The policy recognizes that **women** and **girls** are disproportionately affected by climate change impacts due to their socio-economic roles in natural resource management.", "page_number": 12 },
+    { "text": "Ensure **gender**-responsive climate action by integrating **women**'s participation in decision-making processes for environmental management at all levels.", "page_number": 15 }
   ],
   "case_studies": []
 }
 \```
-Every sentence is copied exactly from the source; only bold was added.
+Every sentence is copied exactly from the source; only bold was added to keywords.
 
-**Wrong (combines every failure mode to avoid)**:
+**Wrong example (combines every failure mode to avoid)**:
 \```json
 {
-  "document_name": "CITES and Gender Brief",
-  "document_type": "A",
+  "document_name": "National Policy",
+  "document_type": "C",
   "relevant_paragraphs": [
-    { "text": "This brief explains why gender matters to CITES. Key points: wildlife trade is gender-differentiated. If you want, I can also provide a summary.", "page_number": 1 }
+    { "text": "This policy explains gender considerations. Key points: women are affected by climate change. I can also provide more details if needed.", "page_number": 1 }
   ],
   "case_studies": []
 }
 \```
-Wrong because: it opens with introductory framing ("This brief explains..."), reformats prose into a bulleted "Key points" list, paraphrases instead of quoting, and appends a service offer. None of that text is a verbatim sentence from the source — every one of these is independently disqualifying.
-
-**Correct (Type E — the one case where summarizing is allowed)**:
-\```json
-{
-  "document_name": "Adopt a Coastline",
-  "document_type": "E",
-  "relevant_paragraphs": [],
-  "case_studies": [
-    {
-      "name": "Adopt a Coastline",
-      "year": "2024",
-      "environmental_topic": "Restoration and Waste Management",
-      "summary": "More than 60 girls and young women trained as coastal stewards plant indigenous trees to slow coastal erosion, protect nesting sites of critically endangered turtles, and manage beach bins. The project, created by local NGO Adopt-a-Coastline, was selected for a $100,000 grant from the UN's Global Environment Facility (GEF).",
-      "source": "https://www.bbc.com/news/world-latin-america-68683693 ; https://www.adoptacoastline.org/",
-      "page_number": null
-    }
-  ]
-}
-\```"""
+Wrong because: it opens with introductory framing ("This policy explains..."), reformats prose into a bulleted "Key points" list, paraphrases instead of quoting, and appends a service offer. None of that text is a verbatim sentence from the source — every one of these is independently disqualifying."""
 
 
 class LLMConfigError(RuntimeError):
@@ -465,6 +421,13 @@ def _call_llm(
     timeout_seconds: int = 300,
 ) -> str:
     settings = get_gpt54_settings()
+    
+    # Log first 100 characters of system prompt
+    system_prompt_preview = system_prompt[:100] + "..." if len(system_prompt) > 100 else system_prompt
+    logger.info(f"[AI API] Starting LLM call")
+    logger.info(f"[AI API] System prompt (first 100 chars): {system_prompt_preview}")
+    logger.info(f"[AI API] User prompt length: {len(user_prompt)} characters")
+    
     headers = {
         "api-key": settings.api_key,
         "Content-Type": "application/json",
@@ -489,6 +452,9 @@ def _call_llm(
         "store": False,
         "temperature": 0.2,
     }
+    
+    logger.info(f"[AI API] Posting request to: {settings.endpoint}")
+    logger.info(f"[AI API] Model deployment: {settings.deployment}")
 
     response = requests.post(
         settings.endpoint,
@@ -496,7 +462,12 @@ def _call_llm(
         json=body,
         timeout=timeout_seconds,
     )
+    
+    logger.info(f"[AI API] Response status code: {response.status_code}")
+    
     if not response.ok:
+        error_preview = response.text[:500] if response.text else "No error message"
+        logger.error(f"[AI API] Request failed with status {response.status_code}: {error_preview}")
         raise RuntimeError(
             f"GPT54 request failed ({response.status_code}): {response.text[:2000]}"
         )
@@ -507,14 +478,20 @@ def _call_llm(
     status = payload.get("status", "unknown")
     usage = payload.get("usage", {})
     logger.info(
-        f"LLM API response - Status: {status}, "
+        f"[AI API] Response - Status: {status}, "
         f"Input tokens: {usage.get('input_tokens', 0)}, "
         f"Output tokens: {usage.get('output_tokens', 0)}"
     )
     
     text = _extract_response_text(payload)
     if not text:
+        logger.error("[AI API] Extracted text is empty")
         raise RuntimeError("GPT54 response contained no text output.")
+    
+    text_preview = text[:200] + "..." if len(text) > 200 else text
+    logger.info(f"[AI API] Output text length: {len(text)} characters")
+    logger.info(f"[AI API] Output text preview (first 200 chars): {text_preview}")
+    
     return text
 
 

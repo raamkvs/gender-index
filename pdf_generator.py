@@ -255,6 +255,9 @@ def generate_gender_report_pdf(
     Returns:
         Path to the generated PDF file (in temp directory)
     """
+    logger.info(f"[PDF GENERATOR] Starting PDF generation for session: {chat_id_topic}")
+    logger.info(f"[PDF GENERATOR] Documents to include: {len(documents)}, Failed downloads: {len(undownloadable_links)}")
+    
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import letter
     from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
@@ -272,6 +275,8 @@ def generate_gender_report_pdf(
     import tempfile
     temp_dir = Path(tempfile.gettempdir())
     pdf_path = temp_dir / f"{chat_id_topic}-report.pdf"
+    
+    logger.info(f"[PDF GENERATOR] PDF output path: {pdf_path}")
     
     # Create document
     doc = SimpleDocTemplate(
