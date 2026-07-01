@@ -11,8 +11,12 @@ from typing import Any, Dict, List, Optional, Tuple
 logger = logging.getLogger(__name__)
 
 
-def _parse_json_extraction(ai_extraction: str) -> Optional[Tuple[str, List[str]]]:
-    """Parse structured JSON extraction into document name and paragraphs."""
+def _parse_json_extraction(ai_extraction: str) -> Optional[Tuple[str, str, List[Dict[str, Any]], List[Dict[str, Any]]]]:
+    """Parse structured JSON extraction into document name, type, paragraphs with pages, and case studies.
+    
+    Returns:
+        Tuple of (document_name, document_type, paragraphs_with_pages, case_studies) or None if parsing fails
+    """
     try:
         data = json.loads(ai_extraction)
     except json.JSONDecodeError:
@@ -22,12 +26,50 @@ def _parse_json_extraction(ai_extraction: str) -> Optional[Tuple[str, List[str]]
         return None
 
     document_name = str(data.get("document_name", "")).strip()
+    document_type = str(data.get("document_type", "A")).strip()
     paragraphs = data.get("relevant_paragraphs", [])
+    case_studies = data.get("case_studies", [])
+    
     if not isinstance(paragraphs, list):
         paragraphs = []
+    if not isinstance(case_studies, list):
+        case_studies = []
 
-    cleaned_paragraphs = [str(p).strip() for p in paragraphs if str(p).strip()]
-    return document_name, cleaned_paragraphs
+    # Handle new format (objects) and old format (strings) for backward compatibility
+    cleaned_paragraphs = []
+    for p in paragraphs:
+        if isinstance(p, dict):
+            # New format: {"text": "...", "page_number": N}
+            text = str(p.get("text", "")).strip()
+            page_number = p.get("page_number")
+            if text:
+                cleaned_paragraphs.append({
+                    "text": text,
+                    "page_number": page_number
+                })
+        elif isinstance(p, str) and p.strip():
+            # Old format: plain string - convert to new format
+            cleaned_paragraphs.append({
+                "text": p.strip(),
+                "page_number": None
+            })
+    
+    # Clean case studies
+    cleaned_case_studies = []
+    for cs in case_studies:
+        if isinstance(cs, dict):
+            name = str(cs.get("name", "")).strip()
+            if name:
+                cleaned_case_studies.append({
+                    "name": name,
+                    "year": str(cs.get("year", "")).strip(),
+                    "environmental_topic": str(cs.get("environmental_topic", "")).strip(),
+                    "summary": str(cs.get("summary", "")).strip(),
+                    "source": str(cs.get("source", "")).strip(),
+                    "page_number": cs.get("page_number")
+                })
+    
+    return document_name, document_type, cleaned_paragraphs, cleaned_case_studies
 
 
 def _parse_markdown_to_flowables(text: str, styles: Any) -> List[Any]:
@@ -281,6 +323,24 @@ def generate_gender_report_pdf(
         spaceAfter=10,
     )
     
+    doc_type_style = ParagraphStyle(
+        'DocType',
+        parent=styles['BodyText'],
+        fontSize=10,
+        textColor=colors.HexColor('#666666'),
+        spaceAfter=6,
+        fontName='Helvetica-Oblique',
+    )
+    
+    page_ref_style = ParagraphStyle(
+        'PageRef',
+        parent=styles['BodyText'],
+        fontSize=9,
+        textColor=colors.HexColor('#888888'),
+        spaceAfter=4,
+        fontName='Helvetica-Oblique',
+    )
+    
     # Title page
     report_title = "Gender Reviewer Report"
     if run_type == "rerun":
@@ -315,9 +375,20 @@ def generate_gender_report_pdf(
 
         parsed = _parse_json_extraction(ai_extraction)
         if parsed:
-            document_name, paragraphs = parsed
+            document_name, document_type, paragraphs_with_pages, case_studies = parsed
             doc_title = document_name or filename.replace(".pdf", "").replace(".PDF", "")
             elements.append(Paragraph(f"<b>{doc_title}</b>", subheading_style))
+            
+            # Display document type
+            doc_type_labels = {
+                "A": "Multilateral Environmental Agreement (MEA)",
+                "B": "Gender Equality Global Agreement",
+                "C": "National Environmental Law/Policy",
+                "D": "National Gender Equality Law/Policy",
+                "E": "Case Study"
+            }
+            type_label = doc_type_labels.get(document_type, f"Type {document_type}")
+            elements.append(Paragraph(f"Document Type: {type_label}", doc_type_style))
             elements.append(Spacer(1, 0.1 * inch))
 
             if source_url:
@@ -332,11 +403,65 @@ def generate_gender_report_pdf(
                 link_text = f'Source: <link href="{safe_url}" color="blue">{safe_url}</link>'
                 elements.append(Paragraph(link_text, link_style))
 
-            if paragraphs:
-                for paragraph in paragraphs:
-                    provision_elements = _parse_markdown_to_flowables(paragraph, styles)
+            # Display paragraphs with page references
+            if paragraphs_with_pages:
+                for para_obj in paragraphs_with_pages:
+                    text = para_obj.get("text", "")
+                    page_number = para_obj.get("page_number")
+                    
+                    # Add page reference if available
+                    if page_number is not None:
+                        page_ref_text = f"(page {page_number})"
+                        elements.append(Paragraph(page_ref_text, page_ref_style))
+                    
+                    # Render the paragraph text with markdown formatting
+                    provision_elements = _parse_markdown_to_flowables(text, styles)
                     elements.extend(provision_elements)
-            else:
+            
+            # Display case studies if present
+            if case_studies:
+                elements.append(Spacer(1, 0.2 * inch))
+                elements.append(Paragraph("<b>Case Studies</b>", subheading_style))
+                
+                for cs in case_studies:
+                    name = cs.get("name", "")
+                    year = cs.get("year", "")
+                    environmental_topic = cs.get("environmental_topic", "")
+                    summary = cs.get("summary", "")
+                    source = cs.get("source", "")
+                    page_number = cs.get("page_number")
+                    
+                    # Case study name and metadata
+                    if name:
+                        cs_header = f"<b>{name}</b>"
+                        if year:
+                            cs_header += f" ({year})"
+                        elements.append(Paragraph(cs_header, body_style))
+                    
+                    if environmental_topic:
+                        elements.append(Paragraph(f"<i>Topic: {environmental_topic}</i>", body_style))
+                    
+                    if page_number is not None:
+                        elements.append(Paragraph(f"(page {page_number})", page_ref_style))
+                    
+                    if summary:
+                        # Render summary with markdown formatting
+                        summary_elements = _parse_markdown_to_flowables(summary, styles)
+                        elements.extend(summary_elements)
+                    
+                    if source:
+                        # Make source clickable if it's a URL
+                        if source.startswith("http://") or source.startswith("https://"):
+                            safe_source = source.replace("&", "&amp;")
+                            source_text = f'Source: <link href="{safe_source}" color="blue">{safe_source}</link>'
+                        else:
+                            source_text = f"Source: {source}"
+                        elements.append(Paragraph(source_text, link_style))
+                    
+                    elements.append(Spacer(1, 0.15 * inch))
+            
+            # Show message if no content found
+            if not paragraphs_with_pages and not case_studies:
                 elements.append(
                     Paragraph(
                         "<i>No relevant gender-related provisions found.</i>",

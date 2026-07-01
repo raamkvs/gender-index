@@ -170,7 +170,6 @@ def _extract_and_store_documents(
         try:
             ai_extraction = analyze_document_with_llm(
                 catalog_entry,
-                keywords=keywords,
                 output_schema_hint=output_schema_hint,
             )
             extraction_data = json.loads(ai_extraction)
@@ -187,7 +186,9 @@ def _extract_and_store_documents(
             ai_extraction = json.dumps(
                 {
                     "document_name": pdf_path.name,
+                    "document_type": "A",
                     "relevant_paragraphs": [],
+                    "case_studies": [],
                     "error": f"Extraction failed: {exc}",
                 }
             )

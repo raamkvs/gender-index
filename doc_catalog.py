@@ -7,22 +7,18 @@ from typing import Any, Dict, List, Optional
 def build_catalog(
     chat_id: str,
     documents: List[Dict[str, Any]],
-    max_chars_per_doc: int = 12_000,
 ) -> Dict[str, Any]:
     catalog_docs: List[Dict[str, Any]] = []
     for index, doc in enumerate(documents, start=1):
         paragraphs = doc.get("paragraphs") or []
         full_text = "\n\n".join(str(p) for p in paragraphs if p)
-        truncated = len(full_text) > max_chars_per_doc
-        text_for_llm = full_text[:max_chars_per_doc] if truncated else full_text
         catalog_docs.append(
             {
                 "doc_index": index,
                 "source_url": doc.get("source_url", ""),
                 "filename": doc.get("filename", ""),
                 "paragraph_count": len(paragraphs),
-                "truncated": truncated,
-                "text": text_for_llm,
+                "text": full_text,
                 "relevant_excerpts": doc.get("relevant_excerpts") or [],
             }
         )
@@ -43,10 +39,6 @@ def catalog_entry_to_prompt_text(entry: Dict[str, Any], keywords: Optional[List[
         f"Filename: {entry.get('filename', '')}",
         f"Source URL: {entry.get('source_url', '')}",
     ]
-    if entry.get("truncated"):
-        parts.append("(Text truncated for model context limits.)")
-    
-    # Add explicit keywords list instead of excerpts
     if keywords:
         parts.append("")
         parts.append(f"Target keywords: {', '.join(keywords)}")

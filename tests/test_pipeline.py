@@ -32,15 +32,14 @@ from pipeline_download import download_pdfs_detailed, is_valid_pdf_file
 # ------------------------------------------------------------------
 
 
-def test_build_catalog_truncates_long_text() -> None:
+def test_build_catalog_preserves_full_text() -> None:
+    long_text = "x" * 20_000
     catalog = build_catalog(
         "chat-1",
-        [{"source_url": "https://x/a.pdf", "filename": "a.pdf", "paragraphs": ["x" * 20_000]}],
-        max_chars_per_doc=100,
+        [{"source_url": "https://x/a.pdf", "filename": "a.pdf", "paragraphs": [long_text]}],
     )
     doc = catalog["documents"][0]
-    assert doc["truncated"] is True
-    assert len(doc["text"]) == 100
+    assert len(doc["text"]) == 20_000
 
 
 def test_catalog_entry_to_prompt_text_includes_metadata() -> None:
@@ -141,10 +140,12 @@ def test_extract_response_text_output_text_field_in_content() -> None:
 
 
 def test_parse_llm_json_response_from_code_fence() -> None:
-    raw = '```json\n{"document_name": "Test", "relevant_paragraphs": ["hello"]}\n```'
+    raw = '```json\n{"document_name": "Test", "document_type": "A", "relevant_paragraphs": [{"text": "hello", "page_number": 1}], "case_studies": []}\n```'
     data = parse_llm_json_response(raw)
     assert data["document_name"] == "Test"
-    assert data["relevant_paragraphs"] == ["hello"]
+    assert data["document_type"] == "A"
+    assert len(data["relevant_paragraphs"]) == 1
+    assert data["relevant_paragraphs"][0]["text"] == "hello"
 
 
 def test_normalize_llm_extraction_from_prose() -> None:
@@ -154,14 +155,19 @@ def test_normalize_llm_extraction_from_prose() -> None:
     )
     data = json.loads(normalized)
     assert "Convention on Biological Diversity" in data["document_name"]
+    assert data["document_type"] == "A"
     assert len(data["relevant_paragraphs"]) >= 1
+    assert "text" in data["relevant_paragraphs"][0]
+    assert "case_studies" in data
 
 
 def test_format_extraction_for_api_from_json() -> None:
     payload = json.dumps(
         {
             "document_name": "Paris Agreement",
-            "relevant_paragraphs": ["Acknowledging **gender equality**."],
+            "document_type": "A",
+            "relevant_paragraphs": [{"text": "Acknowledging **gender equality**.", "page_number": 5}],
+            "case_studies": [],
         }
     )
     formatted = format_extraction_for_api(payload)
@@ -181,17 +187,19 @@ def test_normalize_llm_extraction_filters_heading_fragments() -> None:
     raw = json.dumps(
         {
             "document_name": "PNCL-DH Plan",
+            "document_type": "D",
             "relevant_paragraphs": [
-                "EQUIDAD DE GÉNERO",
-                '"EQUIDAD DE GÉNERO" - "POLÍTICA MONETARIA Y FINANCIERA"',
-                "El Plan Nacional reconoce la importancia de la **política** de **género** para reducir brechas estructurales y garantizar la participación de las mujeres en la toma de decisiones públicas.",
+                {"text": "EQUIDAD DE GÉNERO", "page_number": 1},
+                {"text": '"EQUIDAD DE GÉNERO" - "POLÍTICA MONETARIA Y FINANCIERA"', "page_number": 1},
+                {"text": "El Plan Nacional reconoce la importancia de la **política** de **género** para reducir brechas estructurales y garantizar la participación de las mujeres en la toma de decisiones públicas.", "page_number": 2},
             ],
+            "case_studies": [],
         }
     )
     normalized = normalize_llm_extraction(raw, "fallback.pdf")
     data = json.loads(normalized)
     assert len(data["relevant_paragraphs"]) == 1
-    assert "Plan Nacional" in data["relevant_paragraphs"][0]
+    assert "Plan Nacional" in data["relevant_paragraphs"][0]["text"]
 
 
 def test_catalog_entry_prompt_instructs_substantive_paragraphs() -> None:
@@ -302,7 +310,7 @@ def test_run_gender_pipeline_first_full_mock(tmp_path: Path) -> None:
     mock_supabase = MagicMock()
     mock_supabase.get_all_extractions.return_value = [
         {
-            "ai_extraction": '{"document_name":"Doc A","relevant_paragraphs":["Extract about women."]}',
+            "ai_extraction": '{"document_name":"Doc A","document_type":"A","relevant_paragraphs":[{"text":"Extract about women.","page_number":1}],"case_studies":[]}',
             "filename": "report.pdf",
         }
     ]
@@ -316,10 +324,10 @@ def test_run_gender_pipeline_first_full_mock(tmp_path: Path) -> None:
         patch("pipeline_service._init_blob", return_value=mock_blob),
         patch("pipeline_service.get_azure_settings", return_value=("https://ep", "key")),
         patch("pipeline_service._load_keywords", return_value=["gender", "women"]),
-        patch("pipeline_service.analyze_pdf_paragraphs", return_value=["Women play a vital role."]),
+        patch("pipeline_service.analyze_pdf_paragraphs", return_value=["[PAGE 1]", "Women play a vital role."]),
         patch(
             "pipeline_service.analyze_document_with_llm",
-            return_value='{"document_name":"Doc A","relevant_paragraphs":["Extract about women."]}',
+            return_value='{"document_name":"Doc A","document_type":"A","relevant_paragraphs":[{"text":"Extract about women.","page_number":1}],"case_studies":[]}',
         ),
         patch("pipeline_service._generate_and_upload_pdf", return_value=None),
         patch("pipeline_service.PIPELINE_DOWNLOAD_ROOT", tmp_path / "pipeline"),
@@ -396,7 +404,7 @@ def test_run_gender_pipeline_rerun_returns_combined_extractions(tmp_path: Path) 
     ]
     mock_supabase.get_all_extractions.return_value = [
         {"ai_extraction": "Run 1 extract.", "filename": "a.pdf"},
-        {"ai_extraction": '{"document_name":"Upload","relevant_paragraphs":["Run 2 new extract."]}', "filename": "upload.pdf"},
+        {"ai_extraction": '{"document_name":"Upload","document_type":"C","relevant_paragraphs":[{"text":"Run 2 new extract.","page_number":2}],"case_studies":[]}', "filename": "upload.pdf"},
     ]
     mock_blob = MagicMock()
     mock_blob.download_file.return_value = fake_pdf
@@ -406,10 +414,10 @@ def test_run_gender_pipeline_rerun_returns_combined_extractions(tmp_path: Path) 
         patch("pipeline_service._init_blob", return_value=mock_blob),
         patch("pipeline_service.get_azure_settings", return_value=("ep", "key")),
         patch("pipeline_service._load_keywords", return_value=["gender"]),
-        patch("pipeline_service.analyze_pdf_paragraphs", return_value=["New paragraph."]),
+        patch("pipeline_service.analyze_pdf_paragraphs", return_value=["[PAGE 2]", "New paragraph."]),
         patch(
             "pipeline_service.analyze_document_with_llm",
-            return_value='{"document_name":"Upload","relevant_paragraphs":["Run 2 new extract."]}',
+            return_value='{"document_name":"Upload","document_type":"C","relevant_paragraphs":[{"text":"Run 2 new extract.","page_number":2}],"case_studies":[]}',
         ),
         patch("pipeline_service._generate_and_upload_pdf", return_value=None),
         patch("pipeline_service.PIPELINE_DOWNLOAD_ROOT", tmp_path / "pipeline"),
@@ -449,12 +457,12 @@ def test_per_document_storage_called_per_file(tmp_path: Path) -> None:
         patch("pipeline_service._init_blob", return_value=mock_blob),
         patch("pipeline_service.get_azure_settings", return_value=("ep", "key")),
         patch("pipeline_service._load_keywords", return_value=["gender"]),
-        patch("pipeline_service.analyze_pdf_paragraphs", return_value=["paragraph."]),
+        patch("pipeline_service.analyze_pdf_paragraphs", return_value=["[PAGE 1]", "paragraph."]),
         patch(
             "pipeline_service.analyze_document_with_llm",
             side_effect=[
-                '{"document_name":"A","relevant_paragraphs":["A extract."]}',
-                '{"document_name":"B","relevant_paragraphs":["B extract."]}',
+                '{"document_name":"A","document_type":"A","relevant_paragraphs":[{"text":"A extract.","page_number":1}],"case_studies":[]}',
+                '{"document_name":"B","document_type":"B","relevant_paragraphs":[{"text":"B extract.","page_number":1}],"case_studies":[]}',
             ],
         ),
         patch("pipeline_service._generate_and_upload_pdf", return_value=None),

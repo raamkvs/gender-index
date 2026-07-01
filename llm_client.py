@@ -15,40 +15,156 @@ from doc_catalog import catalog_entry_to_prompt_text
 logger = logging.getLogger(__name__)
 
 DEFAULT_OUTPUT_SCHEMA = """\
-Output a valid JSON object with this exact structure:
+# Gender–Environment Cross-Cutting Extraction Prompt
 
+You extract substantive policy provisions from a single OCR'd document. The keywords and extraction focus depend on the **type of document** being analyzed — determine this first, then apply the matching rules below.
+
+---
+
+## Step 1 — Identify the document type
+
+Based on the document's title, issuing body, and subject matter, classify it into exactly ONE of the following categories:
+
+- **A. Multilateral Environmental Agreement (MEA)** — e.g. CBD, UNFCCC/Paris Agreement, Ramsar, Basel/Rotterdam/Stockholm Conventions, UNCCD, etc.
+- **B. Gender Equality Global Agreement** — e.g. CEDAW, Beijing Platform for Action, CSW agreed conclusions/resolutions, other global gender-equality instruments.
+- **C. National environmental law or policy** — e.g. NDCs, national environment acts, climate strategies, environmental regulations.
+- **D. National gender equality law or policy** — e.g. national gender policy, gender equality act, institutional gender strategy.
+- **E. Case study of a gender-responsive environmental action** — a narrative describing a specific project, program, or initiative (not a legal/policy instrument).
+
+If the type is ambiguous, choose the closest match based on the document's primary subject matter and apply that category's rules.
+
+---
+
+## Step 2 — Apply the keyword list and extraction focus for that category
+
+**A. MEA** — Extraction focus: gender equality / women's empowerment commitments. Keywords: gender, women, woman, girl, girls.
+
+**B. Gender Equality Global Agreement** — Extraction focus: environmental commitments. Keywords: rural women, rural woman, indigenous women, indigenous woman, women, woman environmental defenders, environment, climate change, biodiversity, chemicals, water, degradation, pollution, or any other clearly environment-related term.
+
+**C. National environmental law/policy** — Extraction focus: gender commitments/considerations. Keywords: women, woman, girl, girls, gender, rural women, indigenous women, women environmental defenders.
+
+**D. National gender equality law/policy** — Extraction focus: environmental commitments/considerations. Keywords: women, woman, girl, girls, gender, environment, climate change, biodiversity, chemicals, water, degradation, pollution, or any other clearly environment-related term.
+
+**E. Case study** — Extraction focus: no keyword filter — extract the narrative describing the initiative.
+
+---
+
+## Step 3 — Extract paragraphs (Categories A–D)
+
+Return clear, complete paragraphs of body text that convey relevant points, commitments, or insights from the document.
+
+- Do **NOT** return section headings, chapter titles, table-of-contents entries, or other title-only lines — when a heading marks relevant content, extract the explanatory paragraph(s) that follow it instead.
+- Extract **COMPLETE** body paragraphs containing substantive policy content related to the category's keywords.
+- Each entry must be a full paragraph of continuous prose (typically 2+ sentences, at least ~80 characters) that explains commitments, objectives, measures, rights, obligations, or analysis — not a label or title.
+- Preserve original paragraph wording exactly (no summarization or paraphrasing); copy the full paragraph as it appears in the OCR text, including surrounding sentences for context.
+- Bold all keyword occurrences using markdown (wrap keywords with double asterisks, e.g. `**gender**`).
+- Do NOT extract:
+  - Section headings, chapter titles, table-of-contents lines, agenda items, or bullet labels (e.g. "EQUIDAD DE GÉNERO", "POLÍTICA FISCAL")
+  - Standalone all-caps titles or short quoted phrases without explanatory prose
+  - Lists of headings joined with dashes, commas, or quotation marks
+  - Single-line labels under ~80 characters that lack a complete sentence
+- When a heading introduces relevant content, extract the paragraph(s) of body text beneath it — never the heading alone.
+- If no relevant content is found, return an empty array `[]`.
+
+## Step 3-alt — Extract case study (Category E only)
+
+Summarize the initiative using this structure:
+
+- **name**: Name of the case study/activity
+- **year**: Year (or date range)
+- **environmental_topic**: The environmental topic addressed
+- **summary**: A brief paragraph describing how the initiative promotes gender equality or women's empowerment, including quantitative evidence of impact where available
+- **source**: Online source(s) of the case, if present in the document
+
+---
+
+## Step 4 — Determine the page number for each excerpt
+
+The OCR'd text will contain page markers of some form (e.g. explicit tags like `[PAGE N]` / `--- Page N ---`, running headers/footers with a page number, or a page break pattern inserted by the OCR/Document Intelligence process).
+
+- For each extracted paragraph or case study, identify the page marker that immediately precedes (or contains) that excerpt in the document, and record it as `page_number`.
+- If an excerpt spans two pages, use the page on which it **begins**.
+- If no explicit page marker can be found anywhere in the document, set `page_number` to `null` rather than guessing.
+- Do not fabricate page numbers — only report what can be inferred from markers actually present in the OCR text.
+
+---
+
+## Output format
+
+Output a valid JSON object with this exact structure. No additional text before or after the JSON object.
+
+```json
 {
   "document_name": "Full official document name/citation as it appears in the text",
+  "document_type": "A | B | C | D | E",
   "relevant_paragraphs": [
-    "Full paragraph 1 containing **keyword** with bold formatting...",
-    "Full paragraph 2 containing **keyword** with bold formatting...",
-    ...
+    {
+      "text": "Full paragraph containing keyword with **bold** formatting...",
+      "page_number": 4
+    }
+  ],
+  "case_studies": [
+    {
+      "name": "Activity name",
+      "year": "2024",
+      "environmental_topic": "Restoration and Waste Management",
+      "summary": "Brief paragraph describing the initiative and its gender-equality impact...",
+      "source": "https://example.org",
+      "page_number": 12
+    }
   ]
 }
+```
 
-Rules:
-1. Output must be valid JSON (no additional text before or after the JSON object)
-2. Extract COMPLETE body paragraphs from the document that contain substantive policy content related to any of the provided keywords
-3. Each entry must be a full paragraph of continuous prose (typically 2+ sentences, at least ~80 characters) that explains commitments, objectives, measures, rights, obligations, or analysis — not a label or title
-4. Bold all keyword occurrences using **keyword** markdown format (wrap keywords with double asterisks)
-5. If no relevant content found, return empty array [] for relevant_paragraphs
-6. Document name should include full citation (treaty name, instrument title, document symbol, year, decision/article numbers, etc.)
-7. Each paragraph should be a separate array element
-8. Preserve original paragraph wording (no summarization or paraphrasing); copy the full paragraph as it appears in the OCR text, including surrounding sentences for context
-9. Do NOT extract any of the following as relevant_paragraphs:
-   - Section headings, chapter titles, table-of-contents lines, agenda items, or bullet labels (e.g. "EQUIDAD DE GÉNERO", "POLÍTICA FISCAL")
-   - Standalone all-caps titles or short quoted phrases without explanatory prose
-   - Lists of headings joined with dashes, commas, or quotation marks
-   - Single-line labels under ~80 characters that lack a complete sentence
-10. When a heading introduces relevant content, extract the paragraph(s) of body text beneath it — never the heading alone
+### Rules
 
-Example output:
+1. Output must be valid JSON (no additional text before or after the JSON object).
+2. `document_type` must be exactly one of `A`, `B`, `C`, `D`, `E` per Step 1.
+3. For categories **A–D**, populate `relevant_paragraphs` per Step 3 and leave `case_studies` as an empty array `[]`.
+4. For category **E**, populate `case_studies` per Step 3-alt and leave `relevant_paragraphs` as an empty array `[]`.
+5. Bold all keyword occurrences using markdown (`**keyword**`) inside `text` fields.
+6. Preserve original wording exactly — no paraphrasing or summarization of extracted paragraphs (the `summary` field for case studies is the one exception, per Step 3-alt).
+7. `document_name` should include the full citation (treaty/instrument name, document symbol, year, decision/article numbers, etc.).
+8. Every `relevant_paragraphs` and `case_studies` entry must include a `page_number` (or `null` if genuinely undeterminable), per Step 4.
+9. If no relevant content is found, return empty arrays for both `relevant_paragraphs` and `case_studies` — do not omit either key.
+
+---
+
+### Example output (Category A — MEA)
+
+```json
 {
   "document_name": "Convention on Biological Diversity (CBD) UNEP/CBD/COP/5/23 (2000). V/16. Article 8(j) and related provisions",
+  "document_type": "A",
   "relevant_paragraphs": [
-    "Preamble Recognizing the vital role that **women** play in the conservation and sustainable use of biodiversity, and emphasizing that greater attention should be given to strengthening this role and the participation of **women** of indigenous and local communities in the programme of work."
+    {
+      "text": "Preamble Recognizing the vital role that **women** play in the conservation and sustainable use of biodiversity, and emphasizing that greater attention should be given to strengthening this role and the participation of **women** of indigenous and local communities in the programme of work.",
+      "page_number": 3
+    }
+  ],
+  "case_studies": []
+}
+```
+
+### Example output (Category E — Case study)
+
+```json
+{
+  "document_name": "Adopt a Coastline",
+  "document_type": "E",
+  "relevant_paragraphs": [],
+  "case_studies": [
+    {
+      "name": "Adopt a Coastline",
+      "year": "2024",
+      "environmental_topic": "Restoration and Waste Management",
+      "summary": "More than 60 girls and young women trained as coastal stewards plant indigenous trees to slow coastal erosion, protect nesting sites of critically endangered turtles, and manage beach bins. The project, created by local NGO Adopt-a-Coastline, was selected for a $100,000 grant from the UN's Global Environment Facility (GEF).",
+      "source": "https://www.bbc.com/news/world-latin-america-68683693 ; https://www.adoptacoastline.org/",
+      "page_number": null
+    }
   ]
 }
+```
 """
 
 
@@ -253,25 +369,75 @@ def normalize_llm_extraction(raw: str, filename: str) -> str:
         if not prose:
             data = {
                 "document_name": filename,
+                "document_type": "A",
                 "relevant_paragraphs": [],
+                "case_studies": [],
                 "error": "Empty LLM response",
             }
         else:
+            # Fallback for non-JSON prose responses
             data = {
                 "document_name": _infer_document_name(prose, filename),
-                "relevant_paragraphs": _split_prose_paragraphs(prose),
+                "document_type": "A",
+                "relevant_paragraphs": [
+                    {"text": p, "page_number": None} for p in _split_prose_paragraphs(prose)
+                ],
+                "case_studies": [],
             }
 
     document_name = str(data.get("document_name") or filename).strip() or filename
+    document_type = str(data.get("document_type", "A")).strip() or "A"
+    
+    # Handle relevant_paragraphs - support both new format (objects) and old format (strings)
     paragraphs = data.get("relevant_paragraphs", [])
     if not isinstance(paragraphs, list):
-        paragraphs = [str(paragraphs)] if paragraphs else []
-    paragraphs = [str(p).strip() for p in paragraphs if str(p).strip()]
-    paragraphs = _filter_substantive_paragraphs(paragraphs)
+        paragraphs = []
+    
+    normalized_paragraphs = []
+    for p in paragraphs:
+        if isinstance(p, dict):
+            # New format: {"text": "...", "page_number": N}
+            text = str(p.get("text", "")).strip()
+            page_number = p.get("page_number")
+            if text and not _looks_like_heading_only(text):
+                normalized_paragraphs.append({
+                    "text": text,
+                    "page_number": page_number if page_number is not None else None
+                })
+        elif isinstance(p, str) and p.strip():
+            # Old format: plain string - convert to new format
+            text = p.strip()
+            if not _looks_like_heading_only(text):
+                normalized_paragraphs.append({
+                    "text": text,
+                    "page_number": None
+                })
+    
+    # Handle case_studies
+    case_studies = data.get("case_studies", [])
+    if not isinstance(case_studies, list):
+        case_studies = []
+    
+    normalized_case_studies = []
+    for cs in case_studies:
+        if isinstance(cs, dict):
+            # Validate required fields
+            name = str(cs.get("name", "")).strip()
+            if name:
+                normalized_case_studies.append({
+                    "name": name,
+                    "year": str(cs.get("year", "")).strip() or "",
+                    "environmental_topic": str(cs.get("environmental_topic", "")).strip() or "",
+                    "summary": str(cs.get("summary", "")).strip() or "",
+                    "source": str(cs.get("source", "")).strip() or "",
+                    "page_number": cs.get("page_number") if cs.get("page_number") is not None else None
+                })
 
     normalized: Dict[str, Any] = {
         "document_name": document_name,
-        "relevant_paragraphs": paragraphs,
+        "document_type": document_type,
+        "relevant_paragraphs": normalized_paragraphs,
+        "case_studies": normalized_case_studies,
     }
     if data.get("error"):
         normalized["error"] = str(data["error"])
@@ -290,18 +456,43 @@ def format_extraction_for_api(ai_extraction: str) -> str:
 
     doc_name = str(data.get("document_name", "Unknown Document")).strip()
     paragraphs = data.get("relevant_paragraphs") or []
+    case_studies = data.get("case_studies") or []
     error = data.get("error")
 
-    if error and not paragraphs:
+    if error and not paragraphs and not case_studies:
         return f"{doc_name}. Extraction unavailable ({error})."
-    if not paragraphs:
-        return f"{doc_name}. No relevant gender-related provisions found."
-
+    
     def strip_bold(value: str) -> str:
         return re.sub(r"\*\*(.+?)\*\*", r"\1", str(value))
+    
+    # Handle new format (objects) and old format (strings)
+    texts = []
+    for p in paragraphs:
+        if isinstance(p, dict):
+            text = str(p.get("text", "")).strip()
+            if text:
+                texts.append(strip_bold(text))
+        elif isinstance(p, str) and p.strip():
+            texts.append(strip_bold(p))
+    
+    if not texts and not case_studies:
+        return f"{doc_name}. No relevant gender-related provisions found."
 
-    body = " ".join(strip_bold(p) for p in paragraphs if str(p).strip())
-    return f"{doc_name}. {body}"
+    body = " ".join(texts)
+    
+    # Add case studies if present
+    if case_studies:
+        cs_summaries = []
+        for cs in case_studies:
+            if isinstance(cs, dict):
+                name = cs.get("name", "")
+                summary = cs.get("summary", "")
+                if name or summary:
+                    cs_summaries.append(f"{name}: {summary}".strip(": "))
+        if cs_summaries:
+            body = f"{body} Case studies: {' '.join(cs_summaries)}".strip()
+    
+    return f"{doc_name}. {body}".strip()
 
 
 def _call_llm(
@@ -365,36 +556,14 @@ def _call_llm(
 
 def analyze_document_with_llm(
     catalog_entry: Dict[str, Any],
-    keywords: Optional[List[str]] = None,
     output_schema_hint: Optional[str] = None,
     timeout_seconds: int = 300,
 ) -> str:
     """Run one LLM call for a single catalog document entry."""
-    schema = _resolve_output_schema(output_schema_hint)
+    system_prompt = _resolve_output_schema(output_schema_hint)
     
-    # Build system prompt with keywords
-    keywords_list = keywords or []
-    if keywords_list:
-        keywords_str = ", ".join(keywords_list)
-        system_prompt = (
-            f"You extract substantive policy provisions from a single OCR'd document that relate to ANY of these keywords:\n"
-            f"{keywords_str}\n\n"
-            "Return clear, complete paragraphs of body text that convey relevant points, commitments, or insights from the document. "
-            "Do NOT return section headings, chapter titles, table-of-contents entries, or other title-only lines — "
-            "when a heading marks relevant content, extract the explanatory paragraph(s) that follow it instead.\n\n"
-            "For each extracted paragraph, if any of these keywords appear, highlight them using **bold** markdown formatting.\n\n"
-            f"Output format instructions:\n{schema}"
-        )
-    else:
-        # Fallback if no keywords provided
-        system_prompt = (
-            "You extract gender-related and closely associated provisions from a single "
-            "OCR'd document. Return full substantive paragraphs with relevant insights — "
-            "never section headings or title-only lines. Follow the output format exactly.\n\n"
-            f"Output format instructions:\n{schema}"
-        )
-    
-    user_prompt = catalog_entry_to_prompt_text(catalog_entry, keywords=keywords_list)
+    # User prompt includes document metadata and full text
+    user_prompt = catalog_entry_to_prompt_text(catalog_entry, keywords=None)
     raw_response = _call_llm(system_prompt, user_prompt, timeout_seconds=timeout_seconds)
     filename = str(catalog_entry.get("filename") or "document.pdf")
     return normalize_llm_extraction(raw_response, filename)
@@ -408,7 +577,6 @@ def combine_document_extractions(extractions: List[str]) -> str:
 
 def analyze_all_documents(
     catalog: Dict[str, Any],
-    keywords: Optional[List[str]] = None,
     output_schema_hint: Optional[str] = None,
     timeout_seconds: int = 300,
 ) -> str:
@@ -417,7 +585,6 @@ def analyze_all_documents(
     for entry in catalog.get("documents", []):
         extraction = analyze_document_with_llm(
             entry,
-            keywords=keywords,
             output_schema_hint=output_schema_hint,
             timeout_seconds=timeout_seconds,
         )

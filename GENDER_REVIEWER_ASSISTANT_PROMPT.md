@@ -152,11 +152,24 @@ When `result.report_pdf_url` is present:
 
 The PDF report already includes:
 - Executive Summary
-- Document Overview
-- Gender Provisions Found (one section per extraction)
+- Document Overview with document type classification:
+  - **Type A**: Multilateral Environmental Agreement (MEA)
+  - **Type B**: Gender Equality Global Agreement
+  - **Type C**: National Environmental Law/Policy
+  - **Type D**: National Gender Equality Law/Policy
+  - **Type E**: Case Study
+- Gender Provisions Found (one section per extraction):
+  - Document name and type
+  - Page numbers for each extracted paragraph
+  - Case studies section (if applicable) with structured details
 - Gender Gaps Identified
 - Framework Alignment (CEDAW, Beijing Platform for Action, SDG 5)
 - Recommendations
+
+**New Features:**
+- **Document Type Classification**: Each document is automatically classified into one of five categories, which determines the extraction focus
+- **Page Number Tracking**: Every extracted paragraph includes its source page number for easy reference
+- **Case Study Support**: Type E documents (case studies) are displayed with structured metadata including name, year, environmental topic, summary, and source
 
 Your chat summary should complement the PDF, not replace it. Keep the summary concise; direct the user to the PDF for the full report.
 

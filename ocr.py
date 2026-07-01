@@ -24,8 +24,9 @@ def get_azure_settings() -> Tuple[str, str]:
 
 
 def analyze_pdf_paragraphs(pdf_path: Path, endpoint: str, key: str) -> List[str]:
-    """Run Azure prebuilt-read OCR on a PDF and return paragraph strings.
-
+    """Run Azure prebuilt-read OCR on a PDF and return paragraph strings with page markers.
+    
+    Inserts [PAGE N] markers into the text stream when content transitions between pages.
     Falls back to per-line content if the model does not return paragraphs.
     """
     analyze_urls = [
@@ -75,22 +76,42 @@ def analyze_pdf_paragraphs(pdf_path: Path, endpoint: str, key: str) -> List[str]
         if status == "succeeded":
             analyze_result = payload.get("analyzeResult", {})
             paragraphs = analyze_result.get("paragraphs", [])
-            paragraph_texts = [
-                str(item.get("content", "")).strip()
-                for item in paragraphs
-                if item.get("content")
-            ]
-            if paragraph_texts:
-                return paragraph_texts
+            
+            if paragraphs:
+                # Extract paragraphs with page information
+                paragraph_data = []
+                for item in paragraphs:
+                    content = str(item.get("content", "")).strip()
+                    if not content:
+                        continue
+                    
+                    # Extract page number from boundingRegions
+                    page_number = None
+                    bounding_regions = item.get("boundingRegions", [])
+                    if bounding_regions and isinstance(bounding_regions, list):
+                        first_region = bounding_regions[0]
+                        if isinstance(first_region, dict):
+                            page_number = first_region.get("pageNumber")
+                    
+                    paragraph_data.append((page_number, content))
+                
+                # Build text with page markers
+                return _insert_page_markers(paragraph_data)
 
+            # Fallback: extract lines from pages
             pages = analyze_result.get("pages", [])
-            lines_fallback: List[str] = []
+            line_data = []
             for page in pages:
+                page_number = page.get("pageNumber")
                 for line in page.get("lines", []):
                     content = str(line.get("content", "")).strip()
                     if content:
-                        lines_fallback.append(content)
-            return lines_fallback
+                        line_data.append((page_number, content))
+            
+            if line_data:
+                return _insert_page_markers(line_data)
+            
+            return []
 
         if status == "failed":
             raise RuntimeError(f"OCR failed for {pdf_path.name}: {json.dumps(payload)}")
@@ -99,3 +120,29 @@ def analyze_pdf_paragraphs(pdf_path: Path, endpoint: str, key: str) -> List[str]
             raise TimeoutError(f"OCR timed out for {pdf_path.name}")
 
         time.sleep(POLL_INTERVAL_SECONDS)
+
+
+def _insert_page_markers(content_with_pages: List[Tuple[int | None, str]]) -> List[str]:
+    """Insert [PAGE N] markers into text when page numbers change.
+    
+    Args:
+        content_with_pages: List of (page_number, text_content) tuples
+        
+    Returns:
+        List of text strings with page markers inserted
+    """
+    if not content_with_pages:
+        return []
+    
+    result = []
+    current_page = None
+    
+    for page_number, content in content_with_pages:
+        # Insert page marker when page changes
+        if page_number is not None and page_number != current_page:
+            result.append(f"[PAGE {page_number}]")
+            current_page = page_number
+        
+        result.append(content)
+    
+    return result
