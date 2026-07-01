@@ -51,13 +51,34 @@ If the type is ambiguous, choose the closest match based on the document's prima
 
 ## Step 3 — Extract paragraphs (Categories A–D)
 
-Return clear, complete paragraphs of body text that convey relevant points, commitments, or insights from the document.
+**CRITICAL: VERBATIM EXTRACTION ONLY**
+
+You are an extraction tool, NOT a summarizer. Your job is to COPY paragraphs word-for-word from the source document.
+
+NEVER write phrases like:
+- "The document says that..."
+- "The brief argues..."
+- "According to the text..."
+- "The policy states..."
+- "Here's a concise summary of the document..."
+- "Main message" or numbered synthesis sections (# 1., # 2., etc.)
+
+INSTEAD: Copy the actual sentence(s) from the document.
+
+Example of WRONG output (summary):
+"The document says that men and women often have different access to land and resources."
+
+Example of CORRECT output (verbatim):
+"Men and **women** often have different access to land, resources, and economic alternatives. They may play different roles in wildlife trade as actors and drivers, consumers, or bystanders/observers."
+
+Return clear, complete paragraphs of body text copied verbatim from the document.
 
 - Do **NOT** return section headings, chapter titles, table-of-contents entries, or other title-only lines — when a heading marks relevant content, extract the explanatory paragraph(s) that follow it instead.
 - Extract **COMPLETE** body paragraphs containing substantive policy content related to the category's keywords.
 - Each entry must be a full paragraph of continuous prose (typically 2+ sentences, at least ~80 characters) that explains commitments, objectives, measures, rights, obligations, or analysis — not a label or title.
-- Preserve original paragraph wording exactly (no summarization or paraphrasing); copy the full paragraph as it appears in the OCR text, including surrounding sentences for context.
-- Bold all keyword occurrences using markdown (wrap keywords with double asterisks, e.g. `**gender**`).
+- **COPY TEXT WORD-FOR-WORD** — Do not summarize, paraphrase, rewrite, or interpret. Extract the exact sentences as they appear in the OCR text. If you are writing in your own words, you are doing it wrong.
+- Bold all keyword occurrences using markdown (wrap keywords with double asterisks, e.g. `**gender**`). Only add bold formatting; do not change any other wording.
+- **Validation check**: If the extracted text does NOT appear verbatim in the source document, it is invalid. Each extracted paragraph must be a direct quote (minus the bold formatting you add).
 - Do NOT extract:
   - Section headings, chapter titles, table-of-contents lines, agenda items, or bullet labels (e.g. "EQUIDAD DE GÉNERO", "POLÍTICA FISCAL")
   - Standalone all-caps titles or short quoted phrases without explanatory prose
@@ -67,6 +88,8 @@ Return clear, complete paragraphs of body text that convey relevant points, comm
 - If no relevant content is found, return an empty array `[]`.
 
 ## Step 3-alt — Extract case study (Category E only)
+
+**NOTE: Type E is the ONLY exception where summarization is allowed.**
 
 Summarize the initiative using this structure:
 
@@ -123,7 +146,7 @@ Output a valid JSON object with this exact structure. No additional text before 
 3. For categories **A–D**, populate `relevant_paragraphs` per Step 3 and leave `case_studies` as an empty array `[]`.
 4. For category **E**, populate `case_studies` per Step 3-alt and leave `relevant_paragraphs` as an empty array `[]`.
 5. Bold all keyword occurrences using markdown (`**keyword**`) inside `text` fields.
-6. Preserve original wording exactly — no paraphrasing or summarization of extracted paragraphs (the `summary` field for case studies is the one exception, per Step 3-alt).
+6. **VERBATIM EXTRACTION REQUIRED** — For types A–D, every extracted paragraph must be copied word-for-word from the source document. No paraphrasing, no summarization, no interpretation. The `summary` field for case studies (type E only) is the one exception where you may write in your own words.
 7. `document_name` should include the full citation (treaty/instrument name, document symbol, year, decision/article numbers, etc.).
 8. Every `relevant_paragraphs` and `case_studies` entry must include a `page_number` (or `null` if genuinely undeterminable), per Step 4.
 9. If no relevant content is found, return empty arrays for both `relevant_paragraphs` and `case_studies` — do not omit either key.
@@ -138,13 +161,31 @@ Output a valid JSON object with this exact structure. No additional text before 
   "document_type": "A",
   "relevant_paragraphs": [
     {
-      "text": "Preamble Recognizing the vital role that **women** play in the conservation and sustainable use of biodiversity, and emphasizing that greater attention should be given to strengthening this role and the participation of **women** of indigenous and local communities in the programme of work.",
+      "text": "Recognizing the vital role that **women** play in the conservation and sustainable use of biodiversity, and affirming the need for the full participation of **women** at all levels of policy-making and implementation for biodiversity conservation, the Conference of the Parties emphasizes that greater attention should be given to strengthening this role and the participation of **women** of indigenous and local communities in the programme of work.",
       "page_number": 3
     }
   ],
   "case_studies": []
 }
 ```
+
+### WRONG example (summarization — DO NOT DO THIS)
+
+```json
+{
+  "document_name": "Convention on Biological Diversity",
+  "document_type": "A",
+  "relevant_paragraphs": [
+    {
+      "text": "The document recognizes that **women** play an important role in biodiversity conservation and states that their participation should be strengthened.",
+      "page_number": 3
+    }
+  ],
+  "case_studies": []
+}
+```
+
+This is WRONG because it is a summary in your own words, not the actual text from the document.
 
 ### Example output (Category E — Case study)
 
