@@ -194,9 +194,31 @@ def _extract_response_text(payload: Dict[str, Any]) -> str:
     )
 
 
+# Some upstream callers (e.g. Copilot Studio connectors) cannot send a true
+# null for an optional string field and instead send a literal placeholder
+# word. Treat these as "no hint provided" rather than using them verbatim
+# as the system prompt.
+_NULL_HINT_PLACEHOLDERS = {
+    "blank",
+    "none",
+    "null",
+    "n/a",
+    "na",
+    "undefined",
+    "string",
+    "-",
+}
+
+
 def _resolve_output_schema(output_schema_hint: Optional[str]) -> str:
-    if output_schema_hint and output_schema_hint.strip():
-        return output_schema_hint.strip()
+    if output_schema_hint:
+        cleaned = output_schema_hint.strip()
+        if cleaned and cleaned.lower() not in _NULL_HINT_PLACEHOLDERS:
+            return cleaned
+        if cleaned:
+            logger.warning(
+                f"[AI API] Ignoring placeholder output_schema_hint value {cleaned!r}; using DEFAULT_OUTPUT_SCHEMA instead."
+            )
     return DEFAULT_OUTPUT_SCHEMA
 
 
