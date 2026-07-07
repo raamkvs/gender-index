@@ -114,6 +114,28 @@ If the type is ambiguous, choose the closest match based on the document's prima
 
 \---
 
+## Step 1.5 — Identify legal heading and document symbol
+
+For every document, locate its governing heading structure before extracting paragraphs.
+
+1. **DOCUMENT SYMBOL**: the alphanumeric code typically in the top-right corner or header/footer
+   (e.g., "A/RES/74/236", "CEDAW/C/GC/37", "E/CN.6/2020/3", "CBD/COP/DEC/14/34").
+   Do NOT use this as the citation heading — record it only as `document_symbol` metadata.
+
+2. **LEGAL HEADING** (citation form) — identify per document type:
+   - Resolution: "[Organ] resolution [session]/[number][letter]" e.g. "General Assembly resolution 74/236"
+   - Decision: "[Organ] decision [year]/[number]" e.g. "Economic and Social Council decision 2019/117"
+   - Security Council resolution: "resolution [number] ([year])" e.g. "resolution 479 (1980)"
+   - Treaty/Convention article: "Article [number]" plus article title if present, e.g. "Article 14 — Rural women"
+   - COP/MOP decision: "Decision [session]/[number]" e.g. "Decision 14/34"
+   - General Recommendation/Comment: "General Recommendation No. [number]" (CEDAW) or similar
+   If none of these patterns is found, record `legal_heading` as null — do not invent one.
+
+Heading hierarchy (when present):
+Legal heading → Section (roman numeral) → Agenda item / sub-heading → Paragraph → Extracted text
+
+\---
+
 ## Step 2 — Apply the keyword list and extraction focus for that category
 
 **A. MEA** — Extraction focus: gender equality / women's empowerment commitments. Keywords: gender, women, woman, girl, girls.
@@ -129,6 +151,22 @@ If the type is ambiguous, choose the closest match based on the document's prima
 \---
 
 ## Step 3 — Extract paragraphs (Categories A–D)
+
+For EACH paragraph you extract, you must also identify its governing subheading — the nearest heading that sits directly above that specific paragraph in the document, scanning upward from the paragraph's own location (not a document-wide pass, not the top-level document title).
+
+Subheading resolution rule (per-paragraph):
+- Scan upward from the paragraph until you hit the first heading-like line: an Article number/title ("Article 14 — Rural women"), a Section marker ("Section I", "Part IV"), a numbered clause header ("Article 14(2)(h)"), an agenda item ("Agenda item 3(c)"), or a decision/resolution heading ("Decision 14/34").
+- If that paragraph sits under a heading which itself sits under a higher heading (e.g. Article 14 sits under Section I), record only the immediate (lowest-level) one as `subheading` — do not concatenate the whole chain.
+- Two paragraphs under the same heading get the same `subheading` value. A paragraph immediately following a new heading gets the new one, even if the previous paragraph's heading was different.
+- The subheading text must appear verbatim in the source (same Ctrl+F rule as extraction). If no heading precedes the paragraph anywhere in the document, set `subheading` to null — never invent one or reuse a distant/unrelated heading.
+
+Attach subheading at extraction time:
+{
+  "subheading": "Article 14 — Rural women",
+  "text": "Full paragraph with **bold** keywords...",
+  "page_number": 4
+}
+
 ...
 Bold keyword occurrences using markdown. The keywords for the CURRENT document_type only are:
 - If type A: gender, women, woman, girl, girls
@@ -235,9 +273,15 @@ Output a valid JSON object with this exact structure. No additional text before 
 
 "document_type": "A | B | C | D | E",
 
+"document_symbol": "A/RES/74/236 or null",
+
+"legal_heading": "General Assembly resolution 74/236 or Article 14 — Rural women or null",
+
 "relevant_paragraphs": [
 
 {
+
+"subheading": "Article 14 — Rural women or null",
 
 "text": "Full paragraph containing keyword with **bold** formatting...",
 
@@ -785,14 +829,19 @@ def normalize_llm_extraction(raw: str, filename: str) -> str:
     normalized_paragraphs = []
     for p in paragraphs:
         if isinstance(p, dict):
-            # New format: {"text": "...", "page_number": N}
+            # New format: {"text": "...", "page_number": N, "subheading": "..."}
             text = str(p.get("text", "")).strip()
             page_number = p.get("page_number")
+            subheading = p.get("subheading")
             if text and not _looks_like_heading_only(text):
-                normalized_paragraphs.append({
+                entry: Dict[str, Any] = {
                     "text": text,
-                    "page_number": page_number if page_number is not None else None
-                })
+                    "page_number": page_number if page_number is not None else None,
+                }
+                if subheading is not None:
+                    subheading_text = str(subheading).strip()
+                    entry["subheading"] = subheading_text or None
+                normalized_paragraphs.append(entry)
         elif isinstance(p, str) and p.strip():
             # Old format: plain string - convert to new format
             text = p.strip()
@@ -828,6 +877,12 @@ def normalize_llm_extraction(raw: str, filename: str) -> str:
         "relevant_paragraphs": normalized_paragraphs,
         "case_studies": normalized_case_studies,
     }
+    document_symbol = data.get("document_symbol")
+    if document_symbol is not None:
+        normalized["document_symbol"] = str(document_symbol).strip() or None
+    legal_heading = data.get("legal_heading")
+    if legal_heading is not None:
+        normalized["legal_heading"] = str(legal_heading).strip() or None
     if data.get("error"):
         normalized["error"] = str(data["error"])
     return json.dumps(normalized)
