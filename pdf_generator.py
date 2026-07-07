@@ -11,11 +11,31 @@ from typing import Any, Dict, List, Optional, Tuple
 logger = logging.getLogger(__name__)
 
 
-def _parse_json_extraction(ai_extraction: str) -> Optional[Tuple[str, str, List[Dict[str, Any]], List[Dict[str, Any]]]]:
-    """Parse structured JSON extraction into document name, type, paragraphs with pages, and case studies.
-    
+def _escape_html(text: str) -> str:
+    """Escape text for safe rendering in ReportLab Paragraph."""
+    return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _format_legal_heading_line(
+    legal_heading: Optional[str], document_symbol: Optional[str]
+) -> Optional[str]:
+    """Build 'Legal Heading - Document Symbol' line, omitting missing parts."""
+    parts = [part for part in (legal_heading, document_symbol) if part]
+    if not parts:
+        return None
+    return " - ".join(parts)
+
+
+def _parse_json_extraction(
+    ai_extraction: str,
+) -> Optional[
+    Tuple[str, str, Optional[str], Optional[str], List[Dict[str, Any]], List[Dict[str, Any]]]
+]:
+    """Parse structured JSON extraction for PDF rendering.
+
     Returns:
-        Tuple of (document_name, document_type, paragraphs_with_pages, case_studies) or None if parsing fails
+        Tuple of (document_name, document_type, legal_heading, document_symbol,
+        paragraphs_with_pages, case_studies) or None if parsing fails
     """
     try:
         data = json.loads(ai_extraction)
@@ -27,6 +47,10 @@ def _parse_json_extraction(ai_extraction: str) -> Optional[Tuple[str, str, List[
 
     document_name = str(data.get("document_name", "")).strip()
     document_type = str(data.get("document_type", "A")).strip()
+    legal_heading_raw = data.get("legal_heading")
+    document_symbol_raw = data.get("document_symbol")
+    legal_heading = str(legal_heading_raw).strip() if legal_heading_raw else None
+    document_symbol = str(document_symbol_raw).strip() if document_symbol_raw else None
     paragraphs = data.get("relevant_paragraphs", [])
     case_studies = data.get("case_studies", [])
     
@@ -39,19 +63,21 @@ def _parse_json_extraction(ai_extraction: str) -> Optional[Tuple[str, str, List[
     cleaned_paragraphs = []
     for p in paragraphs:
         if isinstance(p, dict):
-            # New format: {"text": "...", "page_number": N}
             text = str(p.get("text", "")).strip()
             page_number = p.get("page_number")
+            subheading_raw = p.get("subheading")
+            subheading = str(subheading_raw).strip() if subheading_raw else None
             if text:
                 cleaned_paragraphs.append({
                     "text": text,
-                    "page_number": page_number
+                    "page_number": page_number,
+                    "subheading": subheading,
                 })
         elif isinstance(p, str) and p.strip():
-            # Old format: plain string - convert to new format
             cleaned_paragraphs.append({
                 "text": p.strip(),
-                "page_number": None
+                "page_number": None,
+                "subheading": None,
             })
     
     # Clean case studies
@@ -69,7 +95,14 @@ def _parse_json_extraction(ai_extraction: str) -> Optional[Tuple[str, str, List[
                     "page_number": cs.get("page_number")
                 })
     
-    return document_name, document_type, cleaned_paragraphs, cleaned_case_studies
+    return (
+        document_name,
+        document_type,
+        legal_heading,
+        document_symbol,
+        cleaned_paragraphs,
+        cleaned_case_studies,
+    )
 
 
 def _parse_markdown_to_flowables(text: str, styles: Any) -> List[Any]:
@@ -345,6 +378,16 @@ def generate_gender_report_pdf(
         spaceAfter=4,
         fontName='Helvetica-Oblique',
     )
+
+    para_subheading_style = ParagraphStyle(
+        'ParaSubheading',
+        parent=styles['BodyText'],
+        fontSize=11,
+        textColor=colors.HexColor('#003366'),
+        spaceAfter=4,
+        spaceBefore=8,
+        fontName='Helvetica-Bold',
+    )
     
     # Title page
     report_title = "Gender Reviewer Report"
@@ -380,9 +423,20 @@ def generate_gender_report_pdf(
 
         parsed = _parse_json_extraction(ai_extraction)
         if parsed:
-            document_name, document_type, paragraphs_with_pages, case_studies = parsed
+            (
+                document_name,
+                document_type,
+                legal_heading,
+                document_symbol,
+                paragraphs_with_pages,
+                case_studies,
+            ) = parsed
             doc_title = document_name or filename.replace(".pdf", "").replace(".PDF", "")
-            elements.append(Paragraph(f"<b>{doc_title}</b>", subheading_style))
+            elements.append(Paragraph(f"<b>{_escape_html(doc_title)}</b>", subheading_style))
+
+            legal_line = _format_legal_heading_line(legal_heading, document_symbol)
+            if legal_line:
+                elements.append(Paragraph(_escape_html(legal_line), doc_type_style))
             
             # Display document type
             doc_type_labels = {
@@ -411,17 +465,21 @@ def generate_gender_report_pdf(
             # Display paragraphs with page references
             if paragraphs_with_pages:
                 for para_obj in paragraphs_with_pages:
+                    subheading = para_obj.get("subheading")
                     text = para_obj.get("text", "")
                     page_number = para_obj.get("page_number")
-                    
-                    # Add page reference if available
+
+                    if subheading:
+                        elements.append(
+                            Paragraph(_escape_html(subheading), para_subheading_style)
+                        )
+
+                    provision_elements = _parse_markdown_to_flowables(text, styles)
+                    elements.extend(provision_elements)
+
                     if page_number is not None:
                         page_ref_text = f"(page {page_number})"
                         elements.append(Paragraph(page_ref_text, page_ref_style))
-                    
-                    # Render the paragraph text with markdown formatting
-                    provision_elements = _parse_markdown_to_flowables(text, styles)
-                    elements.extend(provision_elements)
             
             # Display case studies if present
             if case_studies:
