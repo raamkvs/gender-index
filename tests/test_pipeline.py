@@ -308,10 +308,12 @@ def test_run_gender_pipeline_first_full_mock(tmp_path: Path) -> None:
     fake_pdf.write_bytes(b"%PDF-1.4 fake")
 
     mock_supabase = MagicMock()
-    mock_supabase.get_all_extractions.return_value = [
+    mock_supabase.get_processed_source_urls.return_value = set()
+    mock_supabase.get_latest_extractions_by_filename.return_value = [
         {
             "ai_extraction": '{"document_name":"Doc A","document_type":"A","relevant_paragraphs":[{"text":"Extract about women.","page_number":1}],"case_studies":[]}',
             "filename": "report.pdf",
+            "processed_at": "2026-01-02T00:00:00Z",
         }
     ]
     mock_supabase.get_generated_document.return_value = None
@@ -349,6 +351,7 @@ def test_run_gender_pipeline_first_full_mock(tmp_path: Path) -> None:
     assert result["run"] == "first"
     assert result["documents_processed"] == 1
     assert result["ai_extractions"] == ["Doc A. Extract about women."]
+    assert result["skipped_links"] == []
     assert len(result["blob_links"]) == 1
     mock_supabase.store_document_extraction.assert_called_once()
     mock_supabase.upsert_pipeline_metadata.assert_called_once()
@@ -357,8 +360,8 @@ def test_run_gender_pipeline_first_full_mock(tmp_path: Path) -> None:
 def test_run_gender_pipeline_rerun_no_uploads(tmp_path: Path) -> None:
     mock_supabase = MagicMock()
     mock_supabase.get_unprocessed_uploads.return_value = []
-    mock_supabase.get_all_extractions.return_value = [
-        {"ai_extraction": "Existing extract.", "filename": "existing.pdf"}
+    mock_supabase.get_latest_extractions_by_filename.return_value = [
+        {"ai_extraction": "Existing extract.", "filename": "existing.pdf", "processed_at": "2026-01-01T00:00:00Z"}
     ]
     mock_supabase.get_generated_document.return_value = None
     mock_blob = MagicMock()
@@ -402,9 +405,13 @@ def test_run_gender_pipeline_rerun_returns_combined_extractions(tmp_path: Path) 
     mock_supabase.get_unprocessed_uploads.return_value = [
         {"id": "uuid-1", "blob_url": "https://blob.vercel/upload.pdf", "filename": "upload.pdf"}
     ]
-    mock_supabase.get_all_extractions.return_value = [
-        {"ai_extraction": "Run 1 extract.", "filename": "a.pdf"},
-        {"ai_extraction": '{"document_name":"Upload","document_type":"C","relevant_paragraphs":[{"text":"Run 2 new extract.","page_number":2}],"case_studies":[]}', "filename": "upload.pdf"},
+    mock_supabase.get_latest_extractions_by_filename.return_value = [
+        {"ai_extraction": "Run 1 extract.", "filename": "a.pdf", "processed_at": "2026-01-01T00:00:00Z"},
+        {
+            "ai_extraction": '{"document_name":"Upload","document_type":"C","relevant_paragraphs":[{"text":"Run 2 new extract.","page_number":2}],"case_studies":[]}',
+            "filename": "upload.pdf",
+            "processed_at": "2026-01-02T00:00:00Z",
+        },
     ]
     mock_blob = MagicMock()
     mock_blob.download_file.return_value = fake_pdf
@@ -444,9 +451,10 @@ def test_per_document_storage_called_per_file(tmp_path: Path) -> None:
     fake_b.write_bytes(b"%PDF b")
 
     mock_supabase = MagicMock()
-    mock_supabase.get_all_extractions.return_value = [
-        {"ai_extraction": "A extract.", "filename": "a.pdf"},
-        {"ai_extraction": "B extract.", "filename": "b.pdf"},
+    mock_supabase.get_processed_source_urls.return_value = set()
+    mock_supabase.get_latest_extractions_by_filename.return_value = [
+        {"ai_extraction": "A extract.", "filename": "a.pdf", "processed_at": "2026-01-01T00:00:00Z"},
+        {"ai_extraction": "B extract.", "filename": "b.pdf", "processed_at": "2026-01-02T00:00:00Z"},
     ]
     mock_blob = MagicMock()
     mock_blob.upload_file.return_value = "https://blob.vercel/x.pdf"
@@ -480,3 +488,153 @@ def test_per_document_storage_called_per_file(tmp_path: Path) -> None:
         )
 
     assert mock_supabase.store_document_extraction.call_count == 2
+
+
+# ------------------------------------------------------------------
+# extraction_utils and dedup/skip tests
+# ------------------------------------------------------------------
+
+
+def test_normalize_source_url() -> None:
+    from extraction_utils import normalize_source_url
+
+    assert normalize_source_url("https://Example.com/doc.pdf/") == normalize_source_url(
+        "https://example.com/doc.pdf"
+    )
+    assert normalize_source_url("  https://x.org/a.pdf  ") == "https://x.org/a.pdf"
+
+
+def test_dedupe_extractions_by_filename_keeps_latest() -> None:
+    from extraction_utils import dedupe_extractions_by_filename
+
+    rows = [
+        {"filename": "a.pdf", "processed_at": "2026-01-01T00:00:00Z", "ai_extraction": "old"},
+        {"filename": "a.pdf", "processed_at": "2026-01-02T00:00:00Z", "ai_extraction": "new"},
+        {"filename": "b.pdf", "processed_at": "2026-01-01T00:00:00Z", "ai_extraction": "b"},
+    ]
+    deduped = dedupe_extractions_by_filename(rows)
+
+    assert len(deduped) == 2
+    assert deduped[0]["ai_extraction"] == "b"
+    assert deduped[1]["ai_extraction"] == "new"
+
+
+def test_first_run_skips_processed_urls(tmp_path: Path) -> None:
+    mock_supabase = MagicMock()
+    mock_supabase.get_processed_source_urls.return_value = {"https://example.com/report.pdf"}
+    mock_supabase.get_latest_extractions_by_filename.return_value = [
+        {
+            "ai_extraction": '{"document_name":"Doc A","document_type":"A","relevant_paragraphs":[],"case_studies":[]}',
+            "filename": "report.pdf",
+            "processed_at": "2026-01-01T00:00:00Z",
+        }
+    ]
+    mock_blob = MagicMock()
+
+    with (
+        patch("pipeline_service.download_pdfs_detailed") as mock_dl,
+        patch("pipeline_service._init_supabase", return_value=mock_supabase),
+        patch("pipeline_service._init_blob", return_value=mock_blob),
+        patch("pipeline_service.get_azure_settings", return_value=("https://ep", "key")),
+        patch("pipeline_service._load_keywords", return_value=["gender"]),
+        patch("pipeline_service._generate_and_upload_pdf", return_value=None),
+        patch("pipeline_service.PIPELINE_DOWNLOAD_ROOT", tmp_path / "pipeline"),
+    ):
+        from pipeline_download import DetailedDownloadResult
+
+        mock_dl.return_value = DetailedDownloadResult()
+
+        result = __import__("pipeline_service").run_gender_pipeline(
+            chat_id_topic="test-topic",
+            links=["https://example.com/report.pdf"],
+            run="first",
+        )
+
+    mock_dl.assert_called_once()
+    assert mock_dl.call_args[0][1] == []
+    mock_supabase.store_document_extraction.assert_not_called()
+    assert result["documents_processed"] == 0
+    assert result["skipped_links"] == [
+        {"url": "https://example.com/report.pdf", "reason": "already processed"}
+    ]
+
+
+def test_first_run_all_links_skipped_still_dedupes_pdf(tmp_path: Path) -> None:
+    deduped_docs = [
+        {
+            "filename": "a.pdf",
+            "ai_extraction": "A extract.",
+            "processed_at": "2026-01-01T00:00:00Z",
+        }
+    ]
+    mock_supabase = MagicMock()
+    mock_supabase.get_processed_source_urls.return_value = {"https://example.com/a.pdf"}
+    mock_supabase.get_latest_extractions_by_filename.return_value = deduped_docs
+    mock_blob = MagicMock()
+
+    with (
+        patch("pipeline_service.download_pdfs_detailed") as mock_dl,
+        patch("pipeline_service._init_supabase", return_value=mock_supabase),
+        patch("pipeline_service._init_blob", return_value=mock_blob),
+        patch("pipeline_service.get_azure_settings", return_value=("https://ep", "key")),
+        patch("pipeline_service._load_keywords", return_value=["gender"]),
+        patch("pipeline_service._generate_and_upload_pdf", return_value=None) as mock_pdf,
+        patch("pipeline_service.PIPELINE_DOWNLOAD_ROOT", tmp_path / "pipeline"),
+    ):
+        from pipeline_download import DetailedDownloadResult
+
+        mock_dl.return_value = DetailedDownloadResult()
+
+        __import__("pipeline_service").run_gender_pipeline(
+            chat_id_topic="test-topic",
+            links=["https://example.com/a.pdf"],
+            run="first",
+        )
+
+    mock_pdf.assert_called_once()
+    assert mock_pdf.call_args.kwargs["documents"] == deduped_docs
+
+
+def test_rerun_still_processes_uploads(tmp_path: Path) -> None:
+    fake_pdf = tmp_path / "existing.pdf"
+    fake_pdf.write_bytes(b"%PDF-1.4 uploaded")
+
+    mock_supabase = MagicMock()
+    mock_supabase.get_unprocessed_uploads.return_value = [
+        {
+            "id": "uuid-1",
+            "blob_url": "https://blob.vercel/existing.pdf",
+            "filename": "existing.pdf",
+        }
+    ]
+    mock_supabase.get_latest_extractions_by_filename.return_value = [
+        {
+            "ai_extraction": '{"document_name":"Existing","document_type":"C","relevant_paragraphs":[{"text":"Updated extract.","page_number":1}],"case_studies":[]}',
+            "filename": "existing.pdf",
+            "processed_at": "2026-01-02T00:00:00Z",
+        }
+    ]
+    mock_blob = MagicMock()
+    mock_blob.download_file.return_value = fake_pdf
+
+    with (
+        patch("pipeline_service._init_supabase", return_value=mock_supabase),
+        patch("pipeline_service._init_blob", return_value=mock_blob),
+        patch("pipeline_service.get_azure_settings", return_value=("ep", "key")),
+        patch("pipeline_service._load_keywords", return_value=["gender"]),
+        patch("pipeline_service.analyze_pdf_paragraphs", return_value=["[PAGE 1]", "Updated paragraph."]),
+        patch(
+            "pipeline_service.analyze_document_with_llm",
+            return_value='{"document_name":"Existing","document_type":"C","relevant_paragraphs":[{"text":"Updated extract.","page_number":1}],"case_studies":[]}',
+        ),
+        patch("pipeline_service._generate_and_upload_pdf", return_value=None),
+        patch("pipeline_service.PIPELINE_DOWNLOAD_ROOT", tmp_path / "pipeline"),
+    ):
+        result = __import__("pipeline_service").run_gender_pipeline(
+            chat_id_topic="test-topic",
+            links=[],
+            run="rerun",
+        )
+
+    assert result["documents_processed"] == 1
+    mock_supabase.store_document_extraction.assert_called_once()

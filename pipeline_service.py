@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Literal, Optional
 
 from blob_client import BlobClient, BlobConfigError, DocGeneratedBlobClient
 from doc_catalog import build_catalog
+from extraction_utils import normalize_source_url
 from keyword_ocr_pipeline import build_keyword_index
 from llm_client import analyze_document_with_llm, format_extraction_for_api
 from ocr import analyze_pdf_paragraphs, get_azure_settings
@@ -243,6 +244,27 @@ def run_gender_pipeline(
     raise ValueError(f"Invalid run type {run!r}. Must be 'first' or 'rerun'.")
 
 
+def _partition_links_by_processed(
+    links: List[str], processed_urls: set[str]
+) -> tuple[List[str], List[Dict[str, str]]]:
+    """Split links into new (to process) and skipped (already processed)."""
+    new_links: List[str] = []
+    skipped_links: List[Dict[str, str]] = []
+
+    for link in links:
+        url = link.strip()
+        if not url:
+            continue
+        normalized = normalize_source_url(url)
+        if normalized in processed_urls:
+            skipped_links.append({"url": url, "reason": "already processed"})
+            logger.info("[PIPELINE] Skipping already-processed URL: %s", url)
+        else:
+            new_links.append(url)
+
+    return new_links, skipped_links
+
+
 def _run_pipeline_first(
     chat_id_topic: str,
     links: List[str],
@@ -257,10 +279,19 @@ def _run_pipeline_first(
     azure_endpoint, azure_key = get_azure_settings()
     keywords = _load_keywords()
 
+    processed_urls = supabase.get_processed_source_urls(chat_id_topic)
+    new_links, skipped_links = _partition_links_by_processed(links, processed_urls)
+    if skipped_links:
+        logger.info(
+            "[PIPELINE] Skipped %d already-processed link(s) for session: %s",
+            len(skipped_links),
+            chat_id_topic,
+        )
+
     # Download PDFs
-    logger.info(f"[PIPELINE] Stage 1: Downloading PDFs from {len(links)} links")
+    logger.info(f"[PIPELINE] Stage 1: Downloading PDFs from {len(new_links)} links")
     download_dir = PIPELINE_DOWNLOAD_ROOT / chat_id_topic
-    download_result = download_pdfs_detailed(download_dir, links, timeout=download_timeout)
+    download_result = download_pdfs_detailed(download_dir, new_links, timeout=download_timeout)
     failed_links: List[FailedLink] = list(download_result.failed_links)
     logger.info(f"[PIPELINE] Download complete: {len(download_result.files)} successful, {len(failed_links)} failed")
 
@@ -304,12 +335,15 @@ def _run_pipeline_first(
         blob_links=blob_links,
     )
 
-    # Get all document records (with filename, blob_url, ai_extraction)
-    all_documents = supabase.get_all_extractions(chat_id_topic)
+    # Get latest document records per filename (deduped)
+    all_documents = supabase.get_latest_extractions_by_filename(chat_id_topic)
     all_extraction_texts = [
         format_extraction_for_api(doc["ai_extraction"]) for doc in all_documents
     ]
-    logger.info(f"[PIPELINE] Retrieved {len(all_documents)} document extractions from Supabase")
+    logger.info(
+        "[PIPELINE] Retrieved %d deduped document extractions from Supabase",
+        len(all_documents),
+    )
 
     # Generate PDF report and upload to docs-generated blob store
     logger.info(f"[PIPELINE] Stage 5: Generating PDF report")
@@ -337,6 +371,7 @@ def _run_pipeline_first(
         "undownloadable_links": undownloadable_list,
         "blob_links": blob_links,
         "ocr_errors": ocr_errors,
+        "skipped_links": skipped_links,
     }
 
 
@@ -359,7 +394,7 @@ def _run_pipeline_rerun(
 
     if not unprocessed:
         logger.info(f"[PIPELINE] No unprocessed uploads found, returning existing data")
-        all_documents = supabase.get_all_extractions(chat_id_topic)
+        all_documents = supabase.get_latest_extractions_by_filename(chat_id_topic)
         all_extraction_texts = [
             format_extraction_for_api(doc["ai_extraction"]) for doc in all_documents
         ]
@@ -430,12 +465,15 @@ def _run_pipeline_rerun(
     logger.info(f"[PIPELINE] Marking {len(unprocessed)} uploads as processed")
     supabase.mark_uploads_processed([u["id"] for u in unprocessed])
 
-    # Get all document records and pipeline metadata
-    all_documents = supabase.get_all_extractions(chat_id_topic)
+    # Get latest document records per filename (deduped) and pipeline metadata
+    all_documents = supabase.get_latest_extractions_by_filename(chat_id_topic)
     all_extraction_texts = [
         format_extraction_for_api(doc["ai_extraction"]) for doc in all_documents
     ]
-    logger.info(f"[PIPELINE] Retrieved {len(all_documents)} document extractions from Supabase")
+    logger.info(
+        "[PIPELINE] Retrieved %d deduped document extractions from Supabase",
+        len(all_documents),
+    )
 
     # Get undownloadable links from pipeline metadata
     pipeline_meta = supabase.get_pipeline_metadata(chat_id_topic)

@@ -114,7 +114,7 @@ class GenderPipelineResponse(BaseModel):
     undownloadable_links: List[FailedLink]
     blob_links: List[BlobLink]
     ocr_errors: List[OCRError] = []
-    report_pdf_url: Optional[str] = None
+    skipped_links: List[FailedLink] = Field(default_factory=list)
 
 
 class GenderPipelineAcceptedResponse(BaseModel):

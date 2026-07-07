@@ -4,7 +4,9 @@ from __future__ import annotations
 import logging
 import os
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
+
+from extraction_utils import dedupe_extractions_by_filename, normalize_source_url
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +69,29 @@ class SupabaseClient:
             .execute()
         )
         return result.data or []
+
+    def get_latest_extractions_by_filename(
+        self, chat_id_topic: str
+    ) -> List[Dict[str, Any]]:
+        """Get one extraction per filename, keeping the latest processed_at."""
+        return dedupe_extractions_by_filename(self.get_all_extractions(chat_id_topic))
+
+    def get_processed_source_urls(self, chat_id_topic: str) -> Set[str]:
+        """Return normalized source URLs already processed for this session."""
+        rows = (
+            self._client.table("document_extractions")
+            .select("source_url")
+            .eq("chat_id_topic", chat_id_topic)
+            .execute()
+        )
+        urls: Set[str] = set()
+        for row in rows.data or []:
+            source_url = row.get("source_url")
+            if source_url:
+                normalized = normalize_source_url(source_url)
+                if normalized:
+                    urls.add(normalized)
+        return urls
 
     def get_all_extraction_texts(self, chat_id_topic: str) -> List[str]:
         """Get just the ai_extraction text for every document under a chat_id_topic."""

@@ -20,7 +20,7 @@ def load_completed_status_from_supabase(chat_id_topic: str) -> Optional[Pipeline
         return None
 
     try:
-        rows = supabase.get_all_extractions(chat_id_topic)
+        rows = supabase.get_latest_extractions_by_filename(chat_id_topic)
         if not rows:
             return None
 
